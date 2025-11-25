@@ -118,6 +118,7 @@ MTPFileInfo* mtp_list_files(uint32_t storage_id, uint32_t parent_id, int* count)
         result[i].size = f->filesize;
         result[i].is_folder = (f->filetype == LIBMTP_FILETYPE_FOLDER);
         result[i].parent_id = f->parent_id;
+        result[i].modification_date = f->modificationdate;
         
         i++;
         f = f->next;

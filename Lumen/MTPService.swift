@@ -273,8 +273,8 @@ class MTPService: FileService {
                             path: finalPath,
                             size: Int64(file.size),
                             type: fileType, // Use the determined file type instead of always .file
-                            modificationDate: Date(),
-                            creationDate: Date() // MTP doesn't provide creation date, so we use current date
+                            modificationDate: Date(timeIntervalSince1970: TimeInterval(file.modification_date)),
+                            creationDate: Date(timeIntervalSince1970: TimeInterval(file.modification_date)) // Use mod date as creation date fallback
                         )
                         items.append(item)
                     }

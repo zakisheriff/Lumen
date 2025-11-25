@@ -17,7 +17,7 @@ typedef struct {
     uint64_t size;
     bool is_folder;
     uint32_t parent_id;
-    // Add more fields if needed (e.g., modification date)
+    uint64_t modification_date; // Unix timestamp
 } MTPFileInfo;
 
 typedef struct {
