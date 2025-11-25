@@ -37,7 +37,7 @@ class ADBService: FileService {
     }
     
     // Helper to run ADB command synchronously (called from background task)
-    private func checkDeviceConnection() throws {
+    nonisolated private func checkDeviceConnection() throws {
         let output = try runADBCommand(["devices"])
         let lines = output.components(separatedBy: .newlines)
         let hasDevice = lines.dropFirst().contains { line in
@@ -65,12 +65,18 @@ class ADBService: FileService {
         let _ = try await Task.detached(priority: .userInitiated) {
             // Use -p flag for progress
             // adb pull -p <remote> <local>
-            try self.runADBCommand(["pull", "-p", path, localURL.path]) { line in
-                if let percent = self.parseProgress(from: line) {
-                    let sizeMB = Double(size) / 1024 / 1024
-                    let downloadedMB = sizeMB * percent
-                    let status = String(format: "%.1f MB of %.1f MB", downloadedMB, sizeMB)
-                    progress(percent, status)
+            let _ = try self.runADBCommand(["pull", "-p", path, localURL.path]) { line in
+                // Parse progress from output like: [ 45%] /path/to/file
+                // ADB pull output format can vary, but often shows percentage
+                // This is a simplified parser
+                if let range = line.range(of: #"\d+%"#, options: .regularExpression) {
+                    let percentStr = String(line[range]).dropLast()
+                    if let percent = Double(percentStr) {
+                        let sizeMB = Double(size) / 1024 / 1024
+                        let downloadedMB = sizeMB * (percent / 100.0)
+                        let status = String(format: "%.1f MB of %.1f MB", downloadedMB, sizeMB)
+                        progress(percent / 100.0, status)
+                    }
                 } else {
                     // Fallback for non-progress lines
                     if !line.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -91,7 +97,7 @@ class ADBService: FileService {
         let _ = try await Task.detached(priority: .userInitiated) {
             // Use -p flag for progress
             // adb push -p <local> <remote>
-            try self.runADBCommand(["push", "-p", localURL.path, path]) { line in
+            let _ = try self.runADBCommand(["push", "-p", localURL.path, path]) { line in
                 if let percent = self.parseProgress(from: line) {
                     progress(percent, "Uploading...")
                 }
@@ -101,7 +107,7 @@ class ADBService: FileService {
         }.value
     }
     
-    private func parseProgress(from line: String) -> Double? {
+    nonisolated private func parseProgress(from line: String) -> Double? {
         if let range = line.range(of: "\\[\\s*(\\d+)%\\]", options: .regularExpression) {
              let matchString = line[range].components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
              if let match = Double(matchString) {
@@ -112,12 +118,12 @@ class ADBService: FileService {
     }
     
     // Internal helper to handle both modes
-    private func runADBCommand(_ arguments: [String]) throws -> String {
+    nonisolated private func runADBCommand(_ arguments: [String]) throws -> String {
         return try runADBCommand(arguments, progressHandler: nil)
     }
 
     // Actual implementation
-    private func runADBCommand(_ arguments: [String], progressHandler: ((String) -> Void)?) throws -> String {
+    nonisolated private func runADBCommand(_ arguments: [String], progressHandler: ((String) -> Void)?) throws -> String {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: adbPath)
         task.arguments = arguments
@@ -127,12 +133,15 @@ class ADBService: FileService {
         task.standardError = pipe
         
         var fullOutput = ""
+        let outputQueue = DispatchQueue(label: "com.lumen.adb.output")
         
         if let handler = progressHandler {
             pipe.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
                 if !data.isEmpty, let str = String(data: data, encoding: .utf8) {
-                    fullOutput += str
+                    outputQueue.sync {
+                        fullOutput += str
+                    }
                     let lines = str.components(separatedBy: CharacterSet(charactersIn: "\r\n"))
                     for line in lines where !line.isEmpty {
                         handler(line)
@@ -156,19 +165,22 @@ class ADBService: FileService {
         }
         
         if task.terminationStatus != 0 {
-             if fullOutput.contains("No such file or directory") {
+             // Access fullOutput safely
+             let outputToCheck = outputQueue.sync { fullOutput }
+             
+             if outputToCheck.contains("No such file or directory") {
                  throw NSError(domain: "ADBService", code: 3, userInfo: [NSLocalizedDescriptionKey: "Path not found: \(arguments.last ?? "")"])
             }
-            if fullOutput.contains("Permission denied") {
+            if outputToCheck.contains("Permission denied") {
                  throw NSError(domain: "ADBService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Permission denied"])
             }
-            throw NSError(domain: "ADBService", code: Int(task.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "ADB Error: \(fullOutput)"])
+            throw NSError(domain: "ADBService", code: Int(task.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "ADB Error: \(outputToCheck)"])
         }
         
-        return fullOutput
+        return outputQueue.sync { fullOutput }
     }
     
-    private func parseLSOutput(_ output: String, parentPath: String) -> [FileSystemItem] {
+    nonisolated private func parseLSOutput(_ output: String, parentPath: String) -> [FileSystemItem] {
         var items: [FileSystemItem] = []
         let lines = output.components(separatedBy: .newlines)
         
