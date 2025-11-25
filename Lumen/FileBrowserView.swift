@@ -6,8 +6,12 @@
 //
 
 import SwiftUI
-import UniformTypeIdentifiers
 import AppKit
+import UniformTypeIdentifiers
+
+// ... (rest of file)
+
+
 
 struct FileBrowserView: View {
     let title: String
@@ -32,10 +36,9 @@ struct FileBrowserView: View {
     
     // Auto-refresh state
     @State private var isAutoRefreshing: Bool = false
+    @State private var connectionState: ConnectionState = .disconnected
     
     // Computed properties for path display and navigation
-    @State private var dragHelper: Any?
-    
     private var canNavigateUp: Bool {
         // For local files, enable up button if not at root
         if !currentPath.hasPrefix("mtp://") {
@@ -326,46 +329,6 @@ struct FileBrowserView: View {
         print("Download and open MTP file: \(item.path)")
     }
     
-    private func createItemProvider(for item: FileSystemItem) -> NSItemProvider {
-        clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: false)
-        
-        if item.path.hasPrefix("mtp://") {
-            let provider = NSItemProvider()
-            let typeIdentifier = UTType(filenameExtension: (item.name as NSString).pathExtension)?.identifier ?? "public.data"
-            
-            // Set suggested name without extension to avoid double extensions in Finder
-            provider.suggestedName = (item.name as NSString).deletingPathExtension
-            
-            provider.registerFileRepresentation(forTypeIdentifier: typeIdentifier, fileOptions: [], visibility: .all) { completion in
-                let tempDir = FileManager.default.temporaryDirectory
-                let tempURL = tempDir.appendingPathComponent(item.name)
-                
-                Task {
-                    do {
-                        if let mtpService = self.fileService as? MTPService {
-                            // Remove existing temp file if any
-                            try? FileManager.default.removeItem(at: tempURL)
-                            
-                            try await mtpService.downloadFile(at: item.path, to: tempURL, size: item.size) { _, _ in }
-                            completion(tempURL, true, nil)
-                        } else {
-                            completion(nil, false, NSError(domain: "Lumen", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid service"]))
-                        }
-                    } catch {
-                        print("Error downloading for drag: \(error)")
-                        completion(nil, false, error)
-                    }
-                }
-                
-                return nil
-            }
-            
-            return provider
-        } else {
-            return NSItemProvider(contentsOf: URL(fileURLWithPath: item.path))!
-        }
-    }
-    
     // Clipboard
     @Binding var clipboard: ClipboardItem?
     let onPaste: (String) -> Void // Callback when paste is triggered in this view
@@ -470,6 +433,17 @@ struct FileBrowserView: View {
                 .buttonStyle(.borderless)
                 .help("Paste")
             }
+            if connectionState == .disconnected || connectionState == .error {
+                Button(action: {
+                    if let mtpService = fileService as? MTPService {
+                        Task {
+                            _ = await mtpService.reconnect()
+                        }
+                    }
+                }) {
+                    Label("Reconnect Device", systemImage: "arrow.clockwise")
+                }
+            }
             
             // View Toggle with Apple-like styling
             Picker("View", selection: $isGridView) {
@@ -487,247 +461,20 @@ struct FileBrowserView: View {
             )
         }
         .padding(.horizontal)
+        .padding(.horizontal)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        // .background(.ultraThinMaterial) // Removed to allow unified window background to show through
     }
     
     // Computed property for the file content view
     private var fileContentView: some View {
         ScrollView {
-            // Error Message Display
             if let errorMessage = errorMessage {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("⚠️ Error")
-                        .font(.headline)
-                        .foregroundColor(.red)
-                    
-                    Text(errorMessage)
-                        .font(.body)
-                        .foregroundColor(.primary)
-                    
-                    // Android-specific troubleshooting guidance
-                    if currentPath.hasPrefix("mtp://") && isAndroidConnectionError(errorMessage) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("📱 Android Device Connection Troubleshooting")
-                                .font(.headline)
-                                .foregroundColor(.blue)
-                            
-                            Text("1. Check USB Connection")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("• Ensure your Android device is properly connected via USB cable\n• Try a different USB cable or port")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            
-                            Text("2. Enable Developer Options & USB Debugging")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("• Go to Settings > About Phone/Tablet\n• Tap \"Build Number\" 7 times to enable Developer Options\n• Go back to Settings > Developer Options\n• Enable \"USB Debugging\"\n• On some devices: Enable \"USB debugging (Security settings)\"")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            
-                            Text("3. Allow Permission on Device")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("• Unlock your Android device\n• Look for a notification asking for permission\n• Tap the notification and select \"Allow\" or \"OK\"\n• Some devices may show a dialog box on the screen - tap \"Allow\"")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            
-                            Text("4. Close Conflicting Applications")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("• Close any other apps that might be accessing your device (e.g., Android File Transfer, Preview)\n• Restart this app after closing other apps")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                            
-                            Text("5. Still Having Issues?")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            Text("• Try disconnecting and reconnecting your device\n• Restart both your computer and Android device\n• Ensure you have the latest device drivers installed")
-                                .font(.body)
-                                .foregroundColor(.primary)
-                        }
-                        .padding()
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(12)
-                    }
-                    
-                    Button("Retry") {
-                        loadItems()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
+                errorView(errorMessage: errorMessage)
             } else if items.isEmpty && errorMessage == nil {
-                // Show loading or empty state
-                VStack {
-                    if currentPath.hasPrefix("mtp://") {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                                .scaleEffect(1.0)
-                                .frame(width: 30, height: 30)
-                            
-                            Text("Connecting to Android device...")
-                                .font(.headline)
-                                .multilineTextAlignment(.center)
-                            
-                            Text("Make sure your device is connected and USB debugging is enabled")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: 300)
-                        .padding()
-                    } else {
-                        Text("No items found")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle()) // Make the whole area tappable
-                .onTapGesture {
-                    // Allow user to manually retry by clicking anywhere
-                    loadItems()
-                }
+                emptyStateView
             } else {
-                // File listing content
-                if isGridView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 20) {
-                        ForEach(filteredAndSortedItems) { item in
-                            VStack {
-                                IconHelper.nativeIcon(for: item)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: iconSize, height: iconSize)
-                                    .shadow(radius: 2, y: 1)
-                                
-                                Text(item.name)
-                                    .font(.caption)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
-                                    .foregroundColor(.primary)
-                            }
-                            .padding(6)
-                            .background(selection.contains(item.id) ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .cornerRadius(12)
-                            .hoverEffect()
-                            .onTapGesture(count: 2) {
-                                handleDoubleClick(on: item)
-                            }
-                            .onTapGesture {
-                                if selection.contains(item.id) {
-                                    selection.remove(item.id)
-                                } else {
-                                    selection = [item.id]
-                                }
-                            }
-                            .contextMenu {
-                                Button("Copy") {
-                                    clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: false)
-                                }
-                                
-                                // Add new context menu options
-                                Button("Move") {
-                                    clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: true)
-                                }
-                                
-                                Button("Get Info") {
-                                    showFileInfo(for: item)
-                                }
-                                
-                                if !item.isDirectory {
-                                    Button("Duplicate") {
-                                        duplicateFile(item)
-                                    }
-                                }
-                                
-                                Button("Delete") {
-                                    deleteFile(item)
-                                }
-                            }
-                            .onDrag {
-                                createItemProvider(for: item)
-                            }
-                        }
-                    }
-                    .padding()
-                } else {
-                    LazyVStack(spacing: 0) {
-                        ForEach(filteredAndSortedItems) { item in
-                            HStack {
-                                IconHelper.nativeIcon(for: item)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: 24, height: 24)
-                                    .shadow(radius: 1, y: 0.5)
-                                
-                                VStack(alignment: .leading) {
-                                    Text(item.name)
-                                        .font(.body)
-                                        .lineLimit(1)
-                                        .foregroundColor(.primary)
-                                }
-                                
-                                Spacer()
-                                
-                                Text(item.formattedSize)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 70, alignment: .trailing)
-                                
-                                Text(item.formattedDate)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 120, alignment: .trailing)
-                            }
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 12)
-                            .background(selection.contains(item.id) ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .contentShape(Rectangle())
-                            .hoverEffect()
-                            .onTapGesture(count: 2) {
-                                handleDoubleClick(on: item)
-                            }
-                            .onTapGesture {
-                                selection = [item.id]
-                            }
-                            .contextMenu {
-                                Button("Copy") {
-                                    clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: false)
-                                }
-                                
-                                // Add new context menu options
-                                Button("Move") {
-                                    clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: true)
-                                }
-                                
-                                Button("Get Info") {
-                                    showFileInfo(for: item)
-                                }
-                                
-                                if !item.isDirectory {
-                                    Button("Duplicate") {
-                                        duplicateFile(item)
-                                    }
-                                }
-                                
-                                Button("Delete") {
-                                    deleteFile(item)
-                                }
-                            }
-                            .onDrag {
-                                createItemProvider(for: item)
-                            }
-                        }
-                    }
-                }
+                fileItemsView
             }
         }
         .background(.background) // Use system background
@@ -747,6 +494,361 @@ struct FileBrowserView: View {
         }
     }
     
+    private func errorView(errorMessage: String) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("⚠️ Error")
+                .font(.headline)
+                .foregroundColor(.red)
+            
+            Text(errorMessage)
+                .font(.body)
+                .foregroundColor(.primary)
+            
+            // Android-specific troubleshooting guidance
+            if currentPath.hasPrefix("mtp://") && isAndroidConnectionError(errorMessage) {
+                androidTroubleshootingView
+            }
+            
+            Button("Retry") {
+                loadItems()
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+    }
+    
+    private var androidTroubleshootingView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("📱 Android Device Connection Troubleshooting")
+                .font(.headline)
+                .foregroundColor(.blue)
+            
+            Text("1. Check USB Connection")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("• Ensure your Android device is properly connected via USB cable\n• Try a different USB cable or port")
+                .font(.body)
+                .foregroundColor(.primary)
+            
+            Text("2. Enable Developer Options & USB Debugging")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("• Go to Settings > About Phone/Tablet\n• Tap \"Build Number\" 7 times to enable Developer Options\n• Go back to Settings > Developer Options\n• Enable \"USB Debugging\"\n• On some devices: Enable \"USB debugging (Security settings)\"")
+                .font(.body)
+                .foregroundColor(.primary)
+            
+            Text("3. Allow Permission on Device")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("• Unlock your Android device\n• Look for a notification asking for permission\n• Tap the notification and select \"Allow\" or \"OK\"\n• Some devices may show a dialog box on the screen - tap \"Allow\"")
+                .font(.body)
+                .foregroundColor(.primary)
+            
+            Text("4. Close Conflicting Applications")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("• Close any other apps that might be accessing your device (e.g., Android File Transfer, Preview)\n• Restart this app after closing other apps")
+                .font(.body)
+                .foregroundColor(.primary)
+            
+            Text("5. Still Having Issues?")
+                .font(.headline)
+                .foregroundColor(.secondary)
+            
+            Text("• Try disconnecting and reconnecting your device\n• Restart both your computer and Android device\n• Ensure you have the latest device drivers installed")
+                .font(.body)
+                .foregroundColor(.primary)
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1))
+        .cornerRadius(12)
+    }
+    
+    private var emptyStateView: some View {
+        VStack {
+            if currentPath.hasPrefix("mtp://") {
+                VStack(spacing: 20) {
+                    if connectionState == .connectedLocked {
+                        // Waiting for permission
+                        Image(systemName: "lock.shield")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.orange)
+                            .symbolEffect(.pulse)
+                        
+                        VStack(spacing: 8) {
+                            Text("Unlock Your Device")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            
+                            Text("Please unlock your Android device and tap 'Allow' on the USB debugging or file transfer prompt.")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 300)
+                        }
+                        
+                        Button("I've Allowed Access") {
+                            Task {
+                                if let mtpService = fileService as? MTPService {
+                                    _ = await mtpService.reconnect()
+                                }
+                                loadItems()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        
+                    } else {
+                        // Connecting or Disconnected
+                        ProgressView()
+                            .scaleEffect(1.0)
+                            .frame(width: 30, height: 30)
+                        
+                        Text("Connecting to Android device...")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                        
+                        Text("Make sure your device is connected and USB debugging is enabled")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: 300)
+                .padding()
+            } else {
+                Text("No items found")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle()) // Make the whole area tappable
+        .onTapGesture {
+            // Allow user to manually retry by clicking anywhere
+            loadItems()
+        }
+    }
+    
+    private var fileItemsView: some View {
+        Group {
+            if isGridView {
+                fileGridView
+            } else {
+                fileListView
+            }
+        }
+    }
+    
+    private var fileGridView: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 20) {
+            ForEach(filteredAndSortedItems) { item in
+                fileGridItem(item)
+            }
+        }
+        .padding()
+    }
+    
+    private func fileGridItem(_ item: FileSystemItem) -> some View {
+        VStack {
+            IconHelper.nativeIcon(for: item)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: iconSize, height: iconSize)
+                .shadow(radius: 2, y: 1)
+            
+            Text(item.name)
+                .font(.caption)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.primary)
+        }
+        .padding(6)
+        .background(
+            ZStack {
+                if selection.contains(item.id) {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.15))
+                    
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
+                }
+            }
+        )
+        .cornerRadius(12)
+        .hoverEffect()
+        .onTapGesture(count: 2) {
+            handleDoubleClick(on: item)
+        }
+        .simultaneousGesture(TapGesture().onEnded {
+            if selection.contains(item.id) {
+                selection.remove(item.id)
+            } else {
+                selection = [item.id]
+            }
+        })
+        .contextMenu {
+            fileContextMenu(for: item)
+        }
+        .onDrag {
+            makeDragItem(for: item)
+        }
+    }
+    
+    private var fileListView: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(filteredAndSortedItems) { item in
+                fileListItem(item)
+            }
+        }
+    }
+    
+    private func fileListItem(_ item: FileSystemItem) -> some View {
+        HStack {
+            IconHelper.nativeIcon(for: item)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 24, height: 24)
+                .shadow(radius: 1, y: 0.5)
+            
+            VStack(alignment: .leading) {
+                Text(item.name)
+                    .font(.body)
+                    .lineLimit(1)
+                    .foregroundColor(.primary)
+            }
+            
+            Spacer()
+            
+            Text(item.formattedSize)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .trailing)
+            
+            Text(item.formattedDate)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 120, alignment: .trailing)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .background(
+            ZStack {
+                if selection.contains(item.id) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.15))
+                    
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
+                }
+            }
+        )
+        .contentShape(Rectangle())
+        .hoverEffect()
+        .onTapGesture(count: 2) {
+            handleDoubleClick(on: item)
+        }
+        .simultaneousGesture(TapGesture().onEnded {
+            selection = [item.id]
+        })
+        .contextMenu {
+            fileContextMenu(for: item)
+        }
+        .onDrag {
+            makeDragItem(for: item)
+        }
+    }
+    
+    @ViewBuilder
+    private func fileContextMenu(for item: FileSystemItem) -> some View {
+        Button("Copy") {
+            clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: false)
+        }
+        
+        Button("Move") {
+            clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: true)
+        }
+        
+        Button("Get Info") {
+            showFileInfo(for: item)
+        }
+        
+        if !item.isDirectory {
+            Button("Duplicate") {
+                duplicateFile(item)
+            }
+        }
+        
+        Button("Delete") {
+            deleteFile(item)
+        }
+    }
+    
+    private func makeDragItem(for item: FileSystemItem) -> NSItemProvider {
+        clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: false)
+        if item.path.hasPrefix("mtp://") {
+            let itemProvider = NSItemProvider()
+            
+            // Fix 1: Set the suggested name so Finder knows what to call it
+            itemProvider.suggestedName = item.name
+            
+            // Determine correct type identifier
+            let fileType: String
+            if item.isDirectory {
+                fileType = UTType.folder.identifier
+            } else {
+                fileType = UTType(filenameExtension: (item.name as NSString).pathExtension)?.identifier ?? "public.data"
+            }
+            
+            let service = fileService
+            let isDir = item.isDirectory
+            let itemPath = item.path
+            let itemSize = item.size
+            let itemName = item.name
+            
+            itemProvider.registerFileRepresentation(forTypeIdentifier: fileType, fileOptions: [], visibility: .all) { completionHandler in
+                _ = Task {
+                    do {
+                        let tempDir = FileManager.default.temporaryDirectory
+                        let tempURL = tempDir.appendingPathComponent(itemName)
+                        
+                        // Clean up existing temp file if needed
+                        try? FileManager.default.removeItem(at: tempURL)
+                        
+                        if let mtpService = service as? MTPService {
+                            if isDir {
+                                // Fix 2: Handle folder download recursively
+                                try await mtpService.downloadFolder(at: itemPath, to: tempURL) { _, _ in }
+                            } else {
+                                try await mtpService.downloadFile(at: itemPath, to: tempURL, size: itemSize) { _, _ in }
+                            }
+                            // Completion handler expects: (URL?, Bool, Error?)
+                            // Bool is 'coordinated'. We pass false for temp file.
+                            completionHandler(tempURL, false, nil)
+                        } else {
+                            completionHandler(nil, false, NSError(domain: "Lumen", code: 1, userInfo: [NSLocalizedDescriptionKey: "MTP Service unavailable"]))
+                        }
+                    } catch {
+                        completionHandler(nil, false, error)
+                    }
+                }
+                
+                // Return a Progress object if desired, or nil
+                return nil
+            }
+            
+            return itemProvider
+        } else {
+            return NSItemProvider(contentsOf: URL(fileURLWithPath: item.path)) ?? NSItemProvider(object: item.path as NSString)
+        }
+    }
+
+    
     var body: some View {
         VStack(spacing: 0) {
             headerView
@@ -763,18 +865,29 @@ struct FileBrowserView: View {
             
             // Set up device connection monitoring for MTP services
             if let mtpService = fileService as? MTPService {
-                mtpService.onDeviceConnectionChange = { isConnected in
-                    if isConnected && currentPath.hasPrefix("mtp://") {
-                        // Device connected, refresh the view
-                        DispatchQueue.main.async {
-                            // Clear cache and refresh
-                            loadItems()
-                        }
-                    } else if !isConnected && currentPath.hasPrefix("mtp://") && items.isEmpty {
-                        // Device disconnected, clear items and show connection message
-                        DispatchQueue.main.async {
-                            items = []
-                            errorMessage = nil
+                mtpService.onDeviceConnectionChange = { state in
+                    DispatchQueue.main.async {
+                        self.connectionState = state
+                        
+                        switch state {
+                        case .connected:
+                            if currentPath.hasPrefix("mtp://") {
+                                // Device connected and unlocked, refresh
+                                loadItems()
+                            }
+                        case .connectedLocked:
+                            // Device connected but locked, UI will update via connectionState
+                            if currentPath.hasPrefix("mtp://") {
+                                errorMessage = nil // Clear any previous errors
+                                items = [] // Clear items to show empty state
+                            }
+                        case .disconnected:
+                            if currentPath.hasPrefix("mtp://") {
+                                items = []
+                                errorMessage = nil
+                            }
+                        case .connecting, .error:
+                            break // No specific action needed
                         }
                     }
                 }
@@ -800,3 +913,5 @@ struct FileBrowserView: View {
         
     }
 }
+
+
