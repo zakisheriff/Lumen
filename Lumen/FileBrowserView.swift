@@ -88,11 +88,108 @@ struct FileBrowserView: View {
     }
     
     private func navigateUp() {
-        let url = URL(fileURLWithPath: currentPath)
-        let parent = url.deletingLastPathComponent()
-        if parent.path != currentPath {
-            currentPath = parent.path
-            loadItems()
+        if currentPath.hasPrefix("mtp://") {
+            // MTP Navigation
+            // Format: mtp://storageId/parentId
+            // If parentId is root, go to mtp://
+            
+            let components = currentPath.replacingOccurrences(of: "mtp://", with: "").split(separator: "/")
+            if components.count > 1 {
+                // We are deep in structure. Go up one level.
+                // But wait, MTP paths are ID based, not hierarchical in the string necessarily if we just append IDs.
+                // Actually, in MTPService I constructed path as "mtp://storageId/fileId".
+                // But `fileId` is the ID of the folder we are IN.
+                // To go up, we need the parent ID of the current folder.
+                // My current path structure "mtp://storageId/currentFolderId" doesn't encode the parent chain.
+                // This is a problem with ID-based navigation if we don't store the stack or parent info.
+                
+                // However, `FileSystemItem` has `parentId`? No, it has `path`.
+                // If I want to support "Up", I need to know the parent.
+                // MTP `GetObjectInfo` gives parent ID.
+                // But `FileBrowserView` only has the path string.
+                
+                // Option 1: Store path as full hierarchy "mtp://storage/rootId/folderId/subfolderId".
+                // Option 2: Fetch parent ID from service when navigating up.
+                // Option 3: Maintain a navigation stack in `FileBrowserView`.
+                
+                // Given `FileBrowserView` is generic, Option 1 is best if possible, but MTP IDs are unique, so hierarchy string is redundant but useful for "Up".
+                // BUT, `MTPService` constructs the path.
+                // If I change `MTPService` to build full paths, it might be complex.
+                
+                // Let's use a simpler approach for now:
+                // If we are at "mtp://...", we can try to pop the last component if we treat it as a stack.
+                // But `MTPService` only returns `mtp://storage/id`. It doesn't return the full chain.
+                // So `navigateUp` is broken for MTP unless I fix `MTPService` or `FileBrowserView`.
+                
+                // Let's assume for now we just go back to root if we can't determine parent, OR we implement a stack.
+                // Implementing a stack in `FileBrowserView` is a good UI pattern anyway.
+                // But `FileBrowserView` is stateless regarding history currently (except `currentPath`).
+                
+                // Let's try to parse "mtp://" generic logic.
+                // If I can't easily go up, I'll disable the button or just go to root.
+                // For a robust solution, I should query the service for the parent.
+                // But `FileService` protocol doesn't have `getParent(path)`.
+                
+                // Hack: For this task, I will just strip the last component.
+                // If `MTPService` produces `mtp://storage/folderA/folderB`, then stripping works.
+                // I need to ensure `MTPService` produces hierarchical paths.
+                // Currently `MTPService` produces `mtp://storage/id`. This is NOT hierarchical.
+                // It implies flat access by ID.
+                
+                // I will modify `MTPService` to try to support hierarchical paths if I can, OR
+                // I will modify `FileBrowserView` to treat `mtp://` specially and maybe just go to root for now,
+                // OR better, I'll add `parentPath` to `FileSystemItem`? No, `FileSystemItem` is fixed.
+                
+                // Let's look at `MTPService.swift` again.
+                // It parses `mtp://storage/id`.
+                // If I navigate to a folder, `MTPService` lists files in that folder.
+                // The items returned have path `mtp://storage/childId`.
+                // If I click a child folder, path becomes `mtp://storage/childId`.
+                // The previous path was `mtp://storage/parentId`.
+                // We lost the parentId.
+                
+                // I should change `MTPService` to append the ID to the current path!
+                // `listItems(at path: String)` -> returns items.
+                // If input path is `mtp://storage/parentId`, the items should have path `mtp://storage/parentId/childId`.
+                // Then `navigateUp` works by stripping last component.
+                // And `parsePath` needs to take the *last* component as the ID.
+                
+                // This seems like the correct fix. I will update `MTPService` first, then `FileBrowserView` logic will work (mostly).
+                // `FileBrowserView` uses `URL` which handles `/` separation.
+                // So I just need to make sure `MTPService` returns hierarchical paths.
+                
+                // Wait, I am in `FileBrowserView` update step.
+                // I will update `FileBrowserView` to handle `mtp://` prefix for `URL` creation because `URL(fileURLWithPath:)` might prepend `file://`.
+                // `URL(string:)` should be used for `mtp://`.
+                
+                if let url = URL(string: currentPath), url.scheme == "mtp" {
+                     let parent = url.deletingLastPathComponent()
+                     if parent.absoluteString != currentPath {
+                         currentPath = parent.absoluteString
+                         // Handle trailing slash if needed
+                         if currentPath.hasSuffix("/") && currentPath != "mtp://" {
+                             currentPath = String(currentPath.dropLast())
+                         }
+                         loadItems()
+                     }
+                } else {
+                    // Local file system
+                    let url = URL(fileURLWithPath: currentPath)
+                    let parent = url.deletingLastPathComponent()
+                    if parent.path != currentPath {
+                        currentPath = parent.path
+                        loadItems()
+                    }
+                }
+            } else {
+                 // Local file system
+                let url = URL(fileURLWithPath: currentPath)
+                let parent = url.deletingLastPathComponent()
+                if parent.path != currentPath {
+                    currentPath = parent.path
+                    loadItems()
+                }
+            }
         }
     }
     
@@ -116,18 +213,20 @@ struct FileBrowserView: View {
                 
                 Spacer()
                 
-                Button(action: navigateUp) {
-                    Image(systemName: "arrow.up")
-                }
-                .disabled(currentPath == "/")
-                
-                Button(action: loadItems) {
-                    Image(systemName: "arrow.clockwise")
+                ControlGroup {
+                    Button(action: navigateUp) {
+                        Image(systemName: "arrow.up")
+                    }
+                    .disabled(currentPath == "/")
+                    
+                    Button(action: loadItems) {
+                        Image(systemName: "arrow.clockwise")
+                    }
                 }
                 
                 // Search
                 TextField("Search", text: $searchText)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(.roundedBorder)
                     .frame(width: 150)
                 
                 // Sort Menu
@@ -151,6 +250,7 @@ struct FileBrowserView: View {
                         Image(systemName: "doc.on.clipboard")
                     }
                     .help("Paste")
+                    .buttonStyle(.borderedProminent)
                 }
                 
                 // View Toggle
@@ -162,7 +262,7 @@ struct FileBrowserView: View {
                 .frame(width: 90)
             }
             .padding()
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(.regularMaterial)
             
             if isLoading {
                 ProgressView("Loading...")
@@ -244,7 +344,7 @@ struct FileBrowserView: View {
                             }
                             .padding(.vertical, 4)
                             .padding(.horizontal)
-                            .background(selection.contains(item.id) ? Color.accentColor : Color.clear)
+                            .background(selection.contains(item.id) ? Color.accentColor.opacity(0.2) : Color.clear) // Native selection style
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) {
                                 navigate(to: item)
@@ -265,7 +365,7 @@ struct FileBrowserView: View {
                     }
                 }
             }
-            .background(Color(NSColor.textBackgroundColor))
+            .background(.background) // Use system background
             .onDrop(of: [.text], isTargeted: nil) { providers in
                 if clipboard != nil {
                     onPaste(currentPath)
@@ -281,11 +381,11 @@ struct FileBrowserView: View {
                 }
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
-        .cornerRadius(8)
+        .background(.thickMaterial) // Ensure material background for the whole view
+        .cornerRadius(12)
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.separator, lineWidth: 1) // Native separator color
         )
         .onAppear {
             loadItems()

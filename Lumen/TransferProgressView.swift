@@ -45,27 +45,8 @@ struct TransferProgressView: View {
         }
         .padding()
         .frame(width: 400)
-        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+        .background(.ultraThinMaterial) // Native material
         .cornerRadius(12)
         .shadow(radius: 10)
-    }
-}
-
-// Helper for blur background
-struct VisualEffectView: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-    
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let visualEffectView = NSVisualEffectView()
-        visualEffectView.material = material
-        visualEffectView.blendingMode = blendingMode
-        visualEffectView.state = .active
-        return visualEffectView
-    }
-    
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
     }
 }
