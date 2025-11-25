@@ -1,4 +1,4 @@
-# <div align="center">Lumen ⚡️</div>
+# <div align="center">Lumen</div>
 
 <div align="center">
   <strong>The Next-Generation Android File Transfer for macOS</strong>
@@ -89,5 +89,5 @@ If Lumen saved you time (or just looks too good to resist), consider buying me a
 ---
 
 <p align="center">
-  Made with ❤️ and Swift by <strong>Zaki Sheriff</strong>
+  Made with Swift by <strong>Zaki Sheriff</strong>
 </p>

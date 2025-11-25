@@ -9,81 +9,56 @@ import SwiftUI
 import AppKit
 
 struct MainView: View {
-    @State private var selectedCategory: String? = "split"
+    @State private var selectedCategory: String? = "local"
     @State private var clipboard: ClipboardItem?
     @StateObject private var transferManager = TransferManager()
     
-    // AI Search
+    // Services
+    let localService = LocalFileService()
+    let remoteService: MTPService
+    
+    // AI Services
     @StateObject private var geminiService = GeminiService()
     @StateObject private var fileScanner: FileScanner
-    @State private var showAISearch = false
+    
+    @State private var showingAISearch = false
     
     init() {
         let mtp = MTPService()
-        _remoteService = State(initialValue: mtp)
-        _fileScanner = StateObject(wrappedValue: FileScanner(mtpService: mtp))
+        self.remoteService = mtp
+        self._fileScanner = StateObject(wrappedValue: FileScanner(mtpService: mtp))
     }
-    
-    // Services
-    let localService = LocalFileService()
-    @State private var remoteService: MTPService // Changed to State to share with scanner
     
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedCategory: $selectedCategory)
+                .background(.ultraThinMaterial) // Native sidebar material
         } detail: {
             ZStack {
-                Group {
-                    if selectedCategory == "mac" {
-                        FileBrowserView(
-                            title: "Mac",
-                            fileService: localService,
-                            currentPath: FileManager.default.homeDirectoryForCurrentUser.path,
-                            clipboard: $clipboard,
-                            onPaste: { destPath in
-                                transferManager.startTransfer(item: clipboard!, to: localService, at: destPath)
-                            }
-                        )
-                        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                    } else if selectedCategory == "android" {
-                        FileBrowserView(
-                            title: "Android",
-                            fileService: remoteService,
-                            currentPath: "mtp://",
-                            clipboard: $clipboard,
-                            onPaste: { destPath in
-                                transferManager.startTransfer(item: clipboard!, to: remoteService, at: destPath)
-                            }
-                        )
-                        .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        // Split View
-                        HSplitView {
-                            // Mac Pane - Real File System
-                            FileBrowserView(
-                                title: "Mac",
-                                fileService: localService,
-                                currentPath: FileManager.default.homeDirectoryForCurrentUser.path,
-                                clipboard: $clipboard,
-                                onPaste: { destPath in
-                                    transferManager.startTransfer(item: clipboard!, to: localService, at: destPath)
-                                }
-                            )
-                            .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
-                            
-                            // Android Pane - Real MTP Connection
-                            FileBrowserView(
-                                title: "Android",
-                                fileService: remoteService,
-                                currentPath: "mtp://",
-                                clipboard: $clipboard,
-                                onPaste: { destPath in
-                                    transferManager.startTransfer(item: clipboard!, to: remoteService, at: destPath)
-                                }
-                            )
-                            .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                HSplitView {
+                    // Mac Pane - Real File System
+                    FileBrowserView(
+                        title: "Mac",
+                        fileService: localService,
+                        currentPath: FileManager.default.homeDirectoryForCurrentUser.path,
+                        clipboard: $clipboard,
+                        onPaste: { destPath in
+                            transferManager.startTransfer(item: clipboard!, to: localService, at: destPath)
                         }
-                    }
+                    )
+                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
+                    
+                    // Android Pane - Real MTP Connection
+                    FileBrowserView(
+                        title: "Android",
+                        fileService: remoteService,
+                        currentPath: "mtp://", // Root MTP path
+                        clipboard: $clipboard,
+                        onPaste: { destPath in
+                            transferManager.startTransfer(item: clipboard!, to: remoteService, at: destPath)
+                        }
+                    )
+                    .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
                 }
                 .padding()
                 
@@ -103,16 +78,17 @@ struct MainView: View {
                     )
                 }
             }
-            // .background(.regularMaterial) // Removed to allow unified window background to show through
+            .background(.regularMaterial) // Main content glass effect
         }
         .frame(minWidth: 800, minHeight: 500)
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
                 // AI Search Button
-                Button(action: { showAISearch.toggle() }) {
+                Button(action: { showingAISearch = true }) {
                     Image(systemName: "sparkles")
                         .foregroundStyle(.purple)
                 }
+                .help("AI Search")
                 
                 // Buy Me a Coffee button in toolbar
                 BuyMeACoffeeButton {
@@ -120,40 +96,22 @@ struct MainView: View {
                 }
             }
         }
-        .overlay(
-            Group {
-                if showAISearch {
-                    ZStack {
-                        Color.black.opacity(0.4)
-                            .edgesIgnoringSafeArea(.all)
-                            .onTapGesture {
-                                // Optional: Uncomment to allow closing by clicking background
-                                // showAISearch = false
-                            }
-                        
-                        AISearchView(
-                            scanner: fileScanner,
-                            geminiService: geminiService,
-                            clipboard: $clipboard,
-                            onOpen: { file in
-                                // Handle opening/transferring file
-                                if file.isRemote {
-                                    print("Opening remote file: \(file.path)")
-                                } else {
-                                    NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
-                                }
-                                // showAISearch = false // Keep open as requested
-                            },
-                            onClose: {
-                                showAISearch = false
-                            }
-                        )
-                        .shadow(radius: 20)
+        .sheet(isPresented: $showingAISearch) {
+            AISearchView(
+                scanner: fileScanner,
+                geminiService: geminiService,
+                clipboard: $clipboard,
+                onOpen: { file in
+                    showingAISearch = false
+                    if !file.isRemote {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
                     }
-                    .transition(.opacity)
+                },
+                onClose: {
+                    showingAISearch = false
                 }
-            }
-        )
+            )
+        }
     }
     
     private func openCoffeePurchaseURL() {
