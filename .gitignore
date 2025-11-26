@@ -1,0 +1,14 @@
+# Build artifacts
+*.dmg
+build/
+*.app
+*.ipa
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscmblueprint
+
+# System files
+.DS_Store
+.AppleDouble
+.LSOverride
