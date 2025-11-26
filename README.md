@@ -6,19 +6,16 @@
 <br />
 
 <div align="center">
-
-<img src="assets/badges/macos-sequoia.svg" height="50" />
-<img src="assets/badges/swift.svg" height="50" />
-<img src="assets/badges/license.svg" height="50" />
+<img src="https://img.shields.io/badge/macOS-Sequioa_Ready-000000?style=for-the-badge&logo=apple&logoColor=white" />
+<img src="https://img.shields.io/badge/Swift-5.9-F05138?style=for-the-badge&logo=swift&logoColor=white" />
+<img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
 
 <br />
 
 <a href="https://github.com/zakisheriff/Lumen/releases/latest">
-<img src="assets/badges/download-dmg.svg" height="50" />
+<img src="https://img.shields.io/badge/Download_Lumen-DMG-blue?style=for-the-badge&logo=apple&logoColor=white" />
 </a>
-
 </div>
-
 
 <br />
 
