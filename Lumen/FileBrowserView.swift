@@ -17,6 +17,7 @@ struct FileBrowserView: View {
     
     @State private var items: [FileSystemItem] = []
     @State private var selection = Set<UUID>()
+    @State private var lastSelectedId: UUID?
     @State private var errorMessage: String?
 
     
@@ -438,6 +439,45 @@ struct FileBrowserView: View {
     @Binding var clipboard: ClipboardItem?
     let onPaste: (String) -> Void // Callback when paste is triggered in this view
     
+    // Selection Logic
+    private func handleSelection(for item: FileSystemItem) {
+        let modifiers = NSEvent.modifierFlags
+        
+        if modifiers.contains(.command) {
+            // Toggle selection
+            if selection.contains(item.id) {
+                selection.remove(item.id)
+            } else {
+                selection.insert(item.id)
+                lastSelectedId = item.id
+            }
+        } else if modifiers.contains(.shift), let lastId = lastSelectedId, let lastIndex = filteredAndSortedItems.firstIndex(where: { $0.id == lastId }), let currentIndex = filteredAndSortedItems.firstIndex(where: { $0.id == item.id }) {
+            // Range selection
+            let start = min(lastIndex, currentIndex)
+            let end = max(lastIndex, currentIndex)
+            let range = filteredAndSortedItems[start...end]
+            for i in range {
+                selection.insert(i.id)
+            }
+        } else {
+            // Single selection
+            selection = [item.id]
+            lastSelectedId = item.id
+        }
+    }
+    
+    // Copy Selection
+    private func copySelection() {
+        let selectedItems = filteredAndSortedItems.filter { selection.contains($0.id) }
+        guard !selectedItems.isEmpty else { return }
+        
+        clipboard = ClipboardItem(
+            items: selectedItems,
+            sourceService: fileService,
+            isCut: false
+        )
+    }
+    
     // State for file info sheet
     @State private var showingFileInfo = false
     @State private var selectedFileInfoItem: FileSystemItem?
@@ -474,13 +514,25 @@ struct FileBrowserView: View {
             
             // Navigation Controls
             HStack(spacing: 0) {
-                Button(action: navigateBack) {
+                Button(action: navigateHome) {
+                    Image(systemName: "house")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 32, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(currentPath == homePath || (currentPath == "/" && !homePath.hasPrefix("mtp")) && !homePath.hasPrefix("ios"))
+                .help("Home")
+                
+                Divider()
+                    .frame(height: 16)
+
+                Button(action: navigateUp) {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 14, weight: .semibold))
                         .frame(width: 32, height: 28)
                 }
                 .buttonStyle(.plain)
-                .disabled(!canNavigateBack)
+                .disabled(!canNavigateUp)
                 .help("Back")
                 
                 Divider()
@@ -494,18 +546,6 @@ struct FileBrowserView: View {
                 .buttonStyle(.plain)
                 .disabled(!canNavigateForward)
                 .help("Forward")
-                
-                Divider()
-                    .frame(height: 16)
-                    
-                Button(action: navigateUp) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 32, height: 28)
-                }
-                .buttonStyle(.plain)
-                .disabled(!canNavigateUp)
-                .help("Up")
                 
                 Divider()
                     .frame(height: 16)
@@ -1012,29 +1052,12 @@ struct FileBrowserView: View {
         .padding()
     }
     
-    @ViewBuilder
-    private func styledIcon(for item: FileSystemItem, size: CGFloat) -> some View {
-        let icon = IconHelper.nativeIcon(for: item)
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(width: size, height: size)
-        
-        if item.path.hasPrefix("mtp://") || item.path.hasPrefix("ios://") {
-            icon.foregroundStyle(
-                LinearGradient(
-                    colors: IconHelper.colorForType(item.type),
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-        } else {
-            icon
-        }
-    }
-
     private func fileGridItem(_ item: FileSystemItem) -> some View {
         VStack {
-            styledIcon(for: item, size: iconSize)
+            IconHelper.nativeIcon(for: item)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: iconSize, height: iconSize)
             
             Text(item.name)
                 .font(.system(.caption, design: .rounded))
@@ -1065,11 +1088,7 @@ struct FileBrowserView: View {
             handleDoubleClick(on: item)
         }
         .simultaneousGesture(TapGesture().onEnded {
-            if selection.contains(item.id) {
-                selection.remove(item.id)
-            } else {
-                selection = [item.id]
-            }
+            handleSelection(for: item)
         })
         .contextMenu {
             fileContextMenu(for: item)
@@ -1090,7 +1109,10 @@ struct FileBrowserView: View {
     
     private func fileListItem(_ item: FileSystemItem) -> some View {
         HStack {
-            styledIcon(for: item, size: 28)
+            IconHelper.nativeIcon(for: item)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 28, height: 28)
             
             VStack(alignment: .leading) {
                 Text(item.name)
@@ -1112,6 +1134,23 @@ struct FileBrowserView: View {
                 .frame(width: 120, alignment: .trailing)
         }
         .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(selection.contains(item.id) ? Color.accentColor.opacity(0.2) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            handleDoubleClick(on: item)
+        }
+        .simultaneousGesture(TapGesture().onEnded {
+            handleSelection(for: item)
+        })
+        .contextMenu {
+            fileContextMenu(for: item)
+        }
+        .onDrag {
+            createItemProvider(for: item)
+        }
         .padding(.horizontal, 12)
         .background(
             ZStack {
@@ -1144,11 +1183,11 @@ struct FileBrowserView: View {
     @ViewBuilder
     private func fileContextMenu(for item: FileSystemItem) -> some View {
         Button("Copy") {
-            clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: false)
+            clipboard = ClipboardItem(items: [item], sourceService: fileService, isCut: false)
         }
         
         Button("Move") {
-            clipboard = ClipboardItem(item: item, sourceService: fileService, isCut: true)
+            clipboard = ClipboardItem(items: [item], sourceService: fileService, isCut: true)
         }
         
         Button("Get Info") {
@@ -1169,7 +1208,7 @@ struct FileBrowserView: View {
     private func createItemProvider(for item: FileSystemItem) -> NSItemProvider {
         // Set clipboard for internal copy/paste
         DispatchQueue.main.async {
-            self.clipboard = ClipboardItem(item: item, sourceService: self.fileService, isCut: false)
+            self.clipboard = ClipboardItem(items: [item], sourceService: self.fileService, isCut: false)
         }
         
         // Check if this is a remote file (MTP or iOS)
@@ -1343,8 +1382,30 @@ struct FileBrowserView: View {
                     Text("Are you sure you want to delete \(item.name)? This action cannot be undone.")
                 }
             }
+            .background(keyboardShortcuts)
             
         }
+
+    
+    // Hidden buttons for keyboard shortcuts
+    private var keyboardShortcuts: some View {
+        VStack {
+            Button("Copy") {
+                copySelection()
+            }
+            .keyboardShortcut("c", modifiers: .command)
+            .opacity(0)
+            
+            Button("Paste") {
+                onPaste(currentPath)
+            }
+            .keyboardShortcut("v", modifiers: .command)
+            .disabled(clipboard == nil)
+            .opacity(0)
+        }
+        .frame(width: 0, height: 0)
     }
     
     
+    
+}

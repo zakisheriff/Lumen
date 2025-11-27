@@ -13,7 +13,7 @@ struct SidebarView: View {
     
     var body: some View {
         List(selection: $selectedCategory) {
-            Section("Views") {
+            Section() {
                 Label("Split Screen", systemImage: "square.split.2x1")
                     .tag("split")
                 Label("Mac", systemImage: "desktopcomputer")

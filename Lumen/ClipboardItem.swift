@@ -8,7 +8,7 @@
 import Foundation
 
 struct ClipboardItem {
-    let item: FileSystemItem
+    let items: [FileSystemItem]
     let sourceService: FileService
     let isCut: Bool // For future move support
 }

@@ -35,7 +35,7 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedCategory: $selectedCategory, deviceManager: deviceManager)
-                .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow))
+                .background(VisualEffectView(material: .headerView, blendingMode: .behindWindow))
         } detail: {
             ZStack {
                 // Liquid Glass Background

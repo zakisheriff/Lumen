@@ -27,9 +27,10 @@ class TransferManager: ObservableObject {
     
     func startTransfer(item: ClipboardItem, to destService: FileService, at destPath: String) {
         guard !isTransferring else { return }
+        guard !item.items.isEmpty else { return }
         
         isTransferring = true
-        filename = item.item.name
+        filename = item.items.count == 1 ? item.items[0].name : "\(item.items.count) files"
         progress = 0
         status = "Preparing..."
         transferSpeed = ""
@@ -44,63 +45,69 @@ class TransferManager: ObservableObject {
                 // Small delay to ensure UI shows "Preparing..."
                 try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
                 
-                // Determine transfer type
-                if item.sourceService is LocalFileService && destService is MTPService {
-                    // Mac -> Android (Upload)
-                    let sourceURL = URL(fileURLWithPath: item.item.path)
-                    try await destService.uploadFile(from: sourceURL, to: destPath) { [weak self] progress, status in
-                        Task { @MainActor in
-                            self?.updateProgress(progress: progress, status: status, totalSize: item.item.size)
+                // Calculate total size
+                let totalSize = item.items.reduce(0) { $0 + $1.size }
+                var totalBytesProcessed: Int64 = 0
+                
+                for fileItem in item.items {
+                    // Determine transfer type
+                    if item.sourceService is LocalFileService && destService is MTPService {
+                        // Mac -> Android (Upload)
+                        let sourceURL = URL(fileURLWithPath: fileItem.path)
+                        try await destService.uploadFile(from: sourceURL, to: destPath) { [weak self] fileProgress, status in
+                            Task { @MainActor in
+                                let currentFileBytes = Int64(Double(fileItem.size) * fileProgress)
+                                let totalProgress = Double(totalBytesProcessed + currentFileBytes) / Double(totalSize > 0 ? totalSize : 1)
+                                self?.updateProgress(progress: totalProgress, status: "Uploading \(fileItem.name)...", totalSize: totalSize)
+                            }
                         }
-                    }
-                } else if item.sourceService is MTPService && destService is LocalFileService {
-                    // Android -> Mac (Download)
-                    let destURL = URL(fileURLWithPath: destPath).appendingPathComponent(item.item.name)
-                    try await item.sourceService.downloadFile(at: item.item.path, to: destURL, size: item.item.size) { [weak self] progress, status in
-                        Task { @MainActor in
-                            self?.updateProgress(progress: progress, status: status, totalSize: item.item.size)
+                    } else if item.sourceService is MTPService && destService is LocalFileService {
+                        // Android -> Mac (Download)
+                        let destURL = URL(fileURLWithPath: destPath).appendingPathComponent(fileItem.name)
+                        try await item.sourceService.downloadFile(at: fileItem.path, to: destURL, size: fileItem.size) { [weak self] fileProgress, status in
+                            Task { @MainActor in
+                                let currentFileBytes = Int64(Double(fileItem.size) * fileProgress)
+                                let totalProgress = Double(totalBytesProcessed + currentFileBytes) / Double(totalSize > 0 ? totalSize : 1)
+                                self?.updateProgress(progress: totalProgress, status: "Downloading \(fileItem.name)...", totalSize: totalSize)
+                            }
                         }
-                    }
-                } else if item.sourceService is LocalFileService && destService is LocalFileService {
-                 // Mac -> Mac (Local Copy)
-                    let destURL = URL(fileURLWithPath: destPath).appendingPathComponent(item.item.name)
-                    try await (item.sourceService as! LocalFileService).downloadFile(at: item.item.path, to: destURL, size: item.item.size) { [weak self] progress, status in
-                     Task { @MainActor in
-                        self?.updateProgress(progress: progress, status: status, totalSize: item.item.size)
-                    }
-                }
-                } else if item.sourceService is LocalFileService && destService is iOSDeviceService {
-                    // Mac -> iOS (Upload)
-                    let sourceURL = URL(fileURLWithPath: item.item.path)
-                    try await destService.uploadFile(from: sourceURL, to: destPath) { [weak self] progress, status in
-                        Task { @MainActor in
-                            self?.updateProgress(progress: progress, status: status, totalSize: item.item.size)
+                    } else if item.sourceService is LocalFileService && destService is LocalFileService {
+                        // Mac -> Mac (Local Copy)
+                        let destURL = URL(fileURLWithPath: destPath).appendingPathComponent(fileItem.name)
+                        try await (item.sourceService as! LocalFileService).downloadFile(at: fileItem.path, to: destURL, size: fileItem.size) { [weak self] fileProgress, status in
+                            Task { @MainActor in
+                                let currentFileBytes = Int64(Double(fileItem.size) * fileProgress)
+                                let totalProgress = Double(totalBytesProcessed + currentFileBytes) / Double(totalSize > 0 ? totalSize : 1)
+                                self?.updateProgress(progress: totalProgress, status: "Copying \(fileItem.name)...", totalSize: totalSize)
+                            }
                         }
-                    }
-                } else if item.sourceService is iOSDeviceService && destService is LocalFileService {
-                    // iOS -> Mac (Download)
-                    let destURL = URL(fileURLWithPath: destPath).appendingPathComponent(item.item.name)
-                    try await item.sourceService.downloadFile(at: item.item.path, to: destURL, size: item.item.size) { [weak self] progress, status in
-                        Task { @MainActor in
-                            self?.updateProgress(progress: progress, status: status, totalSize: item.item.size)
+                    } else if item.sourceService is LocalFileService && destService is iOSDeviceService {
+                        // Mac -> iOS (Upload)
+                        let sourceURL = URL(fileURLWithPath: fileItem.path)
+                        try await destService.uploadFile(from: sourceURL, to: destPath) { [weak self] fileProgress, status in
+                            Task { @MainActor in
+                                let currentFileBytes = Int64(Double(fileItem.size) * fileProgress)
+                                let totalProgress = Double(totalBytesProcessed + currentFileBytes) / Double(totalSize > 0 ? totalSize : 1)
+                                self?.updateProgress(progress: totalProgress, status: "Uploading \(fileItem.name)...", totalSize: totalSize)
+                            }
                         }
+                    } else if item.sourceService is iOSDeviceService && destService is LocalFileService {
+                        // iOS -> Mac (Download)
+                        let destURL = URL(fileURLWithPath: destPath).appendingPathComponent(fileItem.name)
+                        try await item.sourceService.downloadFile(at: fileItem.path, to: destURL, size: fileItem.size) { [weak self] fileProgress, status in
+                            Task { @MainActor in
+                                let currentFileBytes = Int64(Double(fileItem.size) * fileProgress)
+                                let totalProgress = Double(totalBytesProcessed + currentFileBytes) / Double(totalSize > 0 ? totalSize : 1)
+                                self?.updateProgress(progress: totalProgress, status: "Downloading \(fileItem.name)...", totalSize: totalSize)
+                            }
+                        }
+                    } else {
+                        // Unsupported combinations
+                        self.status = "Unsupported transfer type"
+                        try await Task.sleep(nanoseconds: 1_000_000_000)
                     }
-                } else if item.sourceService is iOSDeviceService && destService is iOSDeviceService {
-                    // iOS -> iOS (Not supported yet)
-                    self.status = "Direct iOS-to-iOS transfer not supported"
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                } else if item.sourceService is MTPService && destService is iOSDeviceService {
-                    // Android -> iOS (Not supported yet)
-                    self.status = "Cross-platform transfer (Android to iOS) not supported"
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                } else if item.sourceService is iOSDeviceService && destService is MTPService {
-                    // iOS -> Android (Not supported yet)
-                    self.status = "Cross-platform transfer (iOS to Android) not supported"
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
-                } else {
-                    // Unknown transfer type
-                    self.status = "Unsupported transfer type"
-                    try await Task.sleep(nanoseconds: 2_000_000_000)
+                    
+                    totalBytesProcessed += fileItem.size
                 }
                 
                 self.status = "Done"

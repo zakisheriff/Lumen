@@ -261,7 +261,7 @@ struct AISearchView: View {
                         let service: FileService = file.isRemote ? scanner.mtpService : scanner.localService
                         
                         clipboard = ClipboardItem(
-                            item: fileSystemItem,
+                            items: [fileSystemItem],
                             sourceService: service,
                             isCut: false
                         )

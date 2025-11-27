@@ -3,18 +3,20 @@ import SwiftUI
 
 struct IconHelper {
     static func nativeIcon(for item: FileSystemItem) -> Image {
-        // For remote files (MTP or iOS), use SF Symbols based on file type
-        if item.path.hasPrefix("mtp://") || item.path.hasPrefix("ios://") {
-            // Use SF Symbols for remote files
-            return Image(systemName: item.type.iconName)
+        let workspace = NSWorkspace.shared
+        let nsImage: NSImage
+        
+        if item.isDirectory {
+            // Get the system folder icon
+            nsImage = workspace.icon(forFileType: NSFileTypeForHFSTypeCode(OSType(kGenericFolderIcon)))
         } else {
-            // Local file system – use the actual file path for native macOS icons
-            let workspace = NSWorkspace.shared
-            let url = URL(fileURLWithPath: item.path)
-            let nsImage = workspace.icon(forFile: url.path)
-            nsImage.size = NSSize(width: 128, height: 128) // Higher resolution for better quality
-            return Image(nsImage: nsImage)
+            // Get the system icon for the file extension
+            let ext = (item.path as NSString).pathExtension
+            nsImage = workspace.icon(forFileType: ext.isEmpty ? "public.data" : ext)
         }
+        
+        nsImage.size = NSSize(width: 128, height: 128) // Higher resolution for better quality
+        return Image(nsImage: nsImage)
     }
     
     // Get color for file type (for styling)
