@@ -143,15 +143,15 @@ void mtp_free_files(MTPFileInfo* files) {
 
 // Progress callback wrapper
 // We need a struct to hold both the callback function pointer and the context
-struct CallbackData {
+struct MTPBridgeCallbackData {
     MTPProgressCallback callback;
     const void* context;
     uint64_t lastReportedBytes;
     std::chrono::steady_clock::time_point lastReportTime;
 };
 
-int progress_wrapper(uint64_t const sent, uint64_t const total, void const * const data) {
-    CallbackData* cbData = (CallbackData*)data;
+static int mtp_bridge_progress_wrapper(uint64_t const sent, uint64_t const total, void const * const data) {
+    MTPBridgeCallbackData* cbData = (MTPBridgeCallbackData*)data;
     if (cbData && cbData->callback) {
         // Throttle callbacks to reduce overhead
         // Only report every 1MB or every 100ms, whichever comes first
@@ -180,9 +180,9 @@ int progress_wrapper(uint64_t const sent, uint64_t const total, void const * con
 int mtp_download_file(uint32_t file_id, const char* dest_path, MTPProgressCallback callback, const void* context) {
     if (!device) return -1;
     
-    CallbackData cbData = { callback, context, 0, std::chrono::steady_clock::now() };
+    MTPBridgeCallbackData cbData = { callback, context, 0, std::chrono::steady_clock::now() };
     
-    int ret = LIBMTP_Get_File_To_File(device, file_id, dest_path, progress_wrapper, (void*)&cbData);
+    int ret = LIBMTP_Get_File_To_File(device, file_id, dest_path, mtp_bridge_progress_wrapper, (void*)&cbData);
     return ret;
 }
 
@@ -206,9 +206,9 @@ int mtp_upload_file(const char* source_path, uint32_t storage_id, uint32_t paren
     newfile->storage_id = storage_id;
     newfile->filetype = LIBMTP_FILETYPE_UNKNOWN; // Let libmtp guess or set generic
 
-    CallbackData cbData = { callback, context, 0, std::chrono::steady_clock::now() };
+    MTPBridgeCallbackData cbData = { callback, context, 0, std::chrono::steady_clock::now() };
 
-    int ret = LIBMTP_Send_File_From_File(device, source_path, newfile, progress_wrapper, (void*)&cbData);
+    int ret = LIBMTP_Send_File_From_File(device, source_path, newfile, mtp_bridge_progress_wrapper, (void*)&cbData);
     
     LIBMTP_destroy_file_t(newfile);
     return ret;

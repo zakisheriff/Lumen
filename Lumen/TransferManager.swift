@@ -18,7 +18,7 @@ class TransferManager: ObservableObject {
     @Published var transferSpeed: String = ""
     @Published var timeRemaining: String = ""
     
-    private var currentTask: Task<Void, Never>?
+    private var currentTask: Task<Void, any Error>?
     private var transferStartTime: Date?
     private var lastUpdateTime: Date?
     private var lastBytesTransferred: Int64 = 0
@@ -41,6 +41,9 @@ class TransferManager: ObservableObject {
         
         currentTask = Task {
             do {
+                // Small delay to ensure UI shows "Preparing..."
+                try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                
                 // Determine transfer type
                 if item.sourceService is LocalFileService && destService is MTPService {
                     // Mac -> Android (Upload)
@@ -72,22 +75,29 @@ class TransferManager: ObservableObject {
                     try await Task.sleep(nanoseconds: 2_000_000_000)
                 }
                 
-                self.isTransferring = false
                 self.status = "Done"
+                self.progress = 1.0
                 self.transferSpeed = ""
                 self.timeRemaining = ""
                 
-            } catch {
+                // Keep "Done" message visible for a moment
+                try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
                 self.isTransferring = false
+                
+            } catch {
                 self.status = "Error: \(error.localizedDescription)"
                 self.transferSpeed = ""
                 self.timeRemaining = ""
                 print("Transfer error: \(error)")
+                
+                // Keep error visible
+                try await Task.sleep(nanoseconds: 3_000_000_000) // 3s
+                self.isTransferring = false
             }
         }
     }
     
-    private func updateProgress(progress: Double, status: String, totalSize: Int64) {
+    func updateProgress(progress: Double, status: String, totalSize: Int64) {
         self.progress = progress
         self.status = status
         
@@ -98,32 +108,36 @@ class TransferManager: ObservableObject {
         if let lastUpdate = lastUpdateTime {
             let timeDelta = now.timeIntervalSince(lastUpdate)
             
-            // Only update speed if enough time has passed (avoid division by very small numbers)
-            if timeDelta > 0.1 {
+            // Update speed more frequently (every 50ms)
+            if timeDelta > 0.05 {
                 let bytesDelta = currentBytes - lastBytesTransferred
-                let instantSpeed = Double(bytesDelta) / timeDelta // bytes per second
                 
-                // Add to rolling average
-                speedSamples.append(instantSpeed)
-                if speedSamples.count > maxSpeedSamples {
-                    speedSamples.removeFirst()
+                // Only update if we have moved forward
+                if bytesDelta > 0 {
+                    let instantSpeed = Double(bytesDelta) / timeDelta // bytes per second
+                    
+                    // Add to rolling average
+                    speedSamples.append(instantSpeed)
+                    if speedSamples.count > maxSpeedSamples {
+                        speedSamples.removeFirst()
+                    }
+                    
+                    // Calculate average speed from samples
+                    let avgSpeed = speedSamples.reduce(0, +) / Double(speedSamples.count)
+                    
+                    // Format speed
+                    self.transferSpeed = formatSpeed(bytesPerSecond: avgSpeed)
+                    
+                    // Calculate time remaining
+                    let remainingBytes = totalSize - currentBytes
+                    if avgSpeed > 0 {
+                        let secondsRemaining = Double(remainingBytes) / avgSpeed
+                        self.timeRemaining = formatTimeRemaining(seconds: secondsRemaining)
+                    }
+                    
+                    lastUpdateTime = now
+                    lastBytesTransferred = currentBytes
                 }
-                
-                // Calculate average speed from samples
-                let avgSpeed = speedSamples.reduce(0, +) / Double(speedSamples.count)
-                
-                // Format speed
-                self.transferSpeed = formatSpeed(bytesPerSecond: avgSpeed)
-                
-                // Calculate time remaining
-                let remainingBytes = totalSize - currentBytes
-                if avgSpeed > 0 {
-                    let secondsRemaining = Double(remainingBytes) / avgSpeed
-                    self.timeRemaining = formatTimeRemaining(seconds: secondsRemaining)
-                }
-                
-                lastUpdateTime = now
-                lastBytesTransferred = currentBytes
             }
         }
     }
@@ -132,7 +146,7 @@ class TransferManager: ObservableObject {
         let mbps = bytesPerSecond / (1024 * 1024)
         let kbps = bytesPerSecond / 1024
         
-        if mbps >= 1 {
+        if mbps >= 0.1 {
             return String(format: "%.1f MB/s", mbps)
         } else {
             return String(format: "%.0f KB/s", kbps)
@@ -140,16 +154,18 @@ class TransferManager: ObservableObject {
     }
     
     private func formatTimeRemaining(seconds: Double) -> String {
-        if seconds < 60 {
-            return String(format: "%.0f seconds", seconds)
+        if seconds < 1 {
+            return "Done"
+        } else if seconds < 60 {
+            return String(format: "%.0fs remaining", seconds)
         } else if seconds < 3600 {
             let minutes = Int(seconds / 60)
             let secs = Int(seconds.truncatingRemainder(dividingBy: 60))
-            return "\(minutes)m \(secs)s"
+            return "\(minutes)m \(secs)s remaining"
         } else {
             let hours = Int(seconds / 3600)
             let minutes = Int((seconds.truncatingRemainder(dividingBy: 3600)) / 60)
-            return "\(hours)h \(minutes)m"
+            return "\(hours)h \(minutes)m remaining"
         }
     }
     
@@ -159,6 +175,177 @@ class TransferManager: ObservableObject {
         status = "Cancelled"
         transferSpeed = ""
         timeRemaining = ""
+    }
+    
+    // Handle transfers from Finder drops (direct file URLs)
+    func startTransferFromURL(_ fileURL: URL, to destService: FileService, at destPath: String) {
+        guard !isTransferring else { return }
+        
+        isTransferring = true
+        filename = fileURL.lastPathComponent
+        progress = 0.01 // Show at least a little bit
+        status = "Preparing..."
+        transferSpeed = ""
+        timeRemaining = "Calculating..."
+        transferStartTime = Date()
+        lastUpdateTime = Date()
+        lastBytesTransferred = 0
+        speedSamples = []
+        
+        currentTask = Task {
+            do {
+                // Small delay to ensure UI shows "Preparing..."
+                try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                
+                // Get file size
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+                
+                if destService is MTPService {
+                    // Upload to Android
+                    try await destService.uploadFile(from: fileURL, to: destPath) { [weak self] progress, status in
+                        Task { @MainActor in
+                            self?.updateProgress(progress: progress, status: status, totalSize: fileSize)
+                        }
+                    }
+                } else if destService is LocalFileService {
+                    // Copy to Mac
+                    try await destService.uploadFile(from: fileURL, to: destPath) { [weak self] progress, status in
+                        Task { @MainActor in
+                            self?.updateProgress(progress: progress, status: status, totalSize: fileSize)
+                        }
+                    }
+                }
+                
+                self.status = "Done"
+                self.progress = 1.0
+                self.transferSpeed = ""
+                self.timeRemaining = ""
+                
+                // Keep "Done" message visible for a moment
+                try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
+                self.isTransferring = false
+                
+            } catch {
+                self.status = "Error: \(error.localizedDescription)"
+                self.transferSpeed = ""
+                self.timeRemaining = ""
+                print("Transfer error: \(error)")
+                
+                // Keep error visible
+                try await Task.sleep(nanoseconds: 3_000_000_000) // 3s
+                self.isTransferring = false
+            }
+        }
+    }
+    
+    // Handle multiple file transfers from Finder
+    func startMultipleTransfers(_ fileURLs: [URL], to destService: FileService, at destPath: String) {
+        guard !isTransferring else { return }
+        guard !fileURLs.isEmpty else { return }
+        
+        isTransferring = true
+        filename = "\(fileURLs.count) files"
+        progress = 0.01
+        status = "Preparing..."
+        transferSpeed = ""
+        timeRemaining = "Calculating..."
+        transferStartTime = Date()
+        lastUpdateTime = Date()
+        lastBytesTransferred = 0
+        speedSamples = []
+        
+        currentTask = Task {
+            do {
+                // Small delay to ensure UI shows "Preparing..."
+                try await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                
+                // Calculate total size
+                var totalSize: Int64 = 0
+                for url in fileURLs {
+                    totalSize += (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                }
+                
+                var totalBytesProcessed: Int64 = 0
+                
+                for fileURL in fileURLs {
+                    let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+                    
+                    if destService is MTPService {
+                        try await destService.uploadFile(from: fileURL, to: destPath) { [weak self] fileProgress, status in
+                            Task { @MainActor in
+                                let currentFileBytes = Int64(Double(fileSize) * fileProgress)
+                                let totalProgress = Double(totalBytesProcessed + currentFileBytes) / Double(totalSize > 0 ? totalSize : 1)
+                                
+                                self?.updateProgress(progress: totalProgress, status: "Uploading \(fileURL.lastPathComponent)...", totalSize: totalSize)
+                            }
+                        }
+                    } else if destService is LocalFileService {
+                        try await destService.uploadFile(from: fileURL, to: destPath) { [weak self] fileProgress, status in
+                            Task { @MainActor in
+                                let currentFileBytes = Int64(Double(fileSize) * fileProgress)
+                                let totalProgress = Double(totalBytesProcessed + currentFileBytes) / Double(totalSize > 0 ? totalSize : 1)
+                                
+                                self?.updateProgress(progress: totalProgress, status: "Copying \(fileURL.lastPathComponent)...", totalSize: totalSize)
+                            }
+                        }
+                    }
+                    
+                    totalBytesProcessed += fileSize
+                }
+                
+                self.status = "Done"
+                self.progress = 1.0
+                self.transferSpeed = ""
+                self.timeRemaining = ""
+                
+                // Keep "Done" message visible for a moment
+                try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
+                self.isTransferring = false
+                
+            } catch {
+                self.status = "Error: \(error.localizedDescription)"
+                self.transferSpeed = ""
+                self.timeRemaining = ""
+                print("Transfer error: \(error)")
+                
+                // Keep error visible
+                try await Task.sleep(nanoseconds: 3_000_000_000) // 3s
+                self.isTransferring = false
+            }
+        }
+    }
+    
+    // MARK: - External Transfer Control (for NSItemProvider)
+    
+    func startExternalTransfer(filename: String, totalSize: Int64) {
+        self.isTransferring = true
+        self.filename = filename
+        self.progress = 0.01 // Start with small progress to show bar
+        self.status = "Preparing..."
+        self.transferSpeed = ""
+        self.timeRemaining = "Calculating..."
+        self.transferStartTime = Date()
+        self.lastUpdateTime = Date()
+        self.lastBytesTransferred = 0
+        self.speedSamples = []
+    }
+    
+    func finishExternalTransfer() async {
+        self.status = "Done"
+        self.progress = 1.0
+        self.transferSpeed = ""
+        self.timeRemaining = ""
+        try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s
+        self.isTransferring = false
+    }
+    
+    func failExternalTransfer(error: Error) async {
+        self.status = "Error: \(error.localizedDescription)"
+        self.transferSpeed = ""
+        self.timeRemaining = ""
+        print("External transfer error: \(error)")
+        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3s
+        self.isTransferring = false
     }
 }
 

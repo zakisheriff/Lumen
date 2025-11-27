@@ -80,20 +80,116 @@ class LocalFileService: FileService {
     }
     
     func downloadFile(at path: String, to localURL: URL, size: Int64, progress: @escaping (Double, String) -> Void) async throws {
-        // For local service, "download" is just a copy
-        progress(0, "Preparing...")
+        // For local service, "download" is just a copy with progress tracking
         let sourceURL = URL(fileURLWithPath: path)
-        try fileManager.copyItem(at: sourceURL, to: localURL)
-        progress(1.0, "Completed")
+        try await copyFileWithProgress(from: sourceURL, to: localURL, totalSize: size, progress: progress)
     }
     
     func uploadFile(from localURL: URL, to path: String, progress: @escaping (Double, String) -> Void) async throws {
-        // For local service, "upload" is just a copy
-        progress(0, "Preparing...")
+        // For local service, "upload" is just a copy with progress tracking
         let destURL = URL(fileURLWithPath: path).appendingPathComponent(localURL.lastPathComponent)
-        try fileManager.copyItem(at: localURL, to: destURL)
+        
+        // Get file size
+        let attributes = try fileManager.attributesOfItem(atPath: localURL.path)
+        let fileSize = attributes[.size] as? Int64 ?? 0
+        
+        try await copyFileWithProgress(from: localURL, to: destURL, totalSize: fileSize, progress: progress)
+    }
+    
+    // Helper function to copy files with progress tracking
+    private func copyFileWithProgress(from sourceURL: URL, to destURL: URL, totalSize: Int64, progress: @escaping (Double, String) -> Void) async throws {
+        progress(0, "Preparing...")
+        
+        // For small files (< 10MB), just copy directly
+        if totalSize < 10_485_760 {
+            try fileManager.copyItem(at: sourceURL, to: destURL)
+            progress(1.0, "Completed")
+            return
+        }
+        
+        // For larger files, copy in chunks to show progress
+        let chunkSize = 1_048_576 // 1MB chunks
+        
+        guard let inputStream = InputStream(url: sourceURL) else {
+            throw NSError(domain: "LocalFileService", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cannot open source file"])
+        }
+        
+        guard let outputStream = OutputStream(url: destURL, append: false) else {
+            throw NSError(domain: "LocalFileService", code: 3, userInfo: [NSLocalizedDescriptionKey: "Cannot create destination file"])
+        }
+        
+        inputStream.open()
+        outputStream.open()
+        
+        defer {
+            inputStream.close()
+            outputStream.close()
+        }
+        
+        var buffer = [UInt8](repeating: 0, count: chunkSize)
+        var totalBytesWritten: Int64 = 0
+        let startTime = Date()
+        
+        while inputStream.hasBytesAvailable {
+            let bytesRead = inputStream.read(&buffer, maxLength: chunkSize)
+            
+            if bytesRead < 0 {
+                throw inputStream.streamError ?? NSError(domain: "LocalFileService", code: 4, userInfo: [NSLocalizedDescriptionKey: "Read error"])
+            }
+            
+            if bytesRead == 0 {
+                break
+            }
+            
+            let bytesWritten = outputStream.write(buffer, maxLength: bytesRead)
+            
+            if bytesWritten < 0 {
+                throw outputStream.streamError ?? NSError(domain: "LocalFileService", code: 5, userInfo: [NSLocalizedDescriptionKey: "Write error"])
+            }
+            
+            totalBytesWritten += Int64(bytesWritten)
+            
+            // Calculate progress
+            let progressValue = Double(totalBytesWritten) / Double(totalSize)
+            
+            // Calculate speed
+            let elapsed = Date().timeIntervalSince(startTime)
+            let speed = elapsed > 0 ? Double(totalBytesWritten) / elapsed : 0
+            let speedMBps = speed / (1024 * 1024)
+            
+            // Calculate remaining time
+            let remainingBytes = totalSize - totalBytesWritten
+            let remainingTime = speed > 0 ? Double(remainingBytes) / speed : 0
+            
+            let statusMessage = String(format: "Copying %.1f MB/s - %@ remaining", 
+                                     speedMBps,
+                                     formatTimeRemaining(seconds: remainingTime))
+            
+            progress(progressValue, statusMessage)
+            
+            // Small delay to prevent UI overload
+            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+        
         progress(1.0, "Completed")
     }
+    
+    private func formatTimeRemaining(seconds: Double) -> String {
+        if seconds < 1 {
+            return "< 1s"
+        } else if seconds < 60 {
+            return String(format: "%.0fs", seconds)
+        } else if seconds < 3600 {
+            let minutes = Int(seconds / 60)
+            let secs = Int(seconds.truncatingRemainder(dividingBy: 60))
+            return "\(minutes)m \(secs)s"
+        } else {
+            let hours = Int(seconds / 3600)
+            let minutes = Int((seconds.truncatingRemainder(dividingBy: 3600)) / 60)
+            return "\(hours)h \(minutes)m"
+        }
+    }
+
     
     func deleteItem(at path: String) async throws {
         let url = URL(fileURLWithPath: path)

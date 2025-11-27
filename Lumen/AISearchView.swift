@@ -37,13 +37,14 @@ struct AISearchView: View {
             resultsArea
             footerView
         }
-        .frame(width: 500, height: 600)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .cornerRadius(16)
+        .frame(width: 600, height: 500)
+        .background(VisualEffectView(material: .popover, blendingMode: .withinWindow))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.2), lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.3), radius: 30, x: 0, y: 15)
         .alert("Enter Gemini API Key", isPresented: $showApiKeyAlert) {
             SecureField("API Key", text: $apiKeyInput)
             Button("Save") {
@@ -62,68 +63,113 @@ struct AISearchView: View {
     }
     
     private var headerView: some View {
-        HStack {
-            Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .font(.title2)
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .symbolEffect(.pulse)
+                
+                Text("Lumen AI")
+                    .font(.system(.title3, design: .rounded))
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.secondary.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+
             }
-            .buttonStyle(.plain)
-            .padding(.trailing, 8)
             
-            Image(systemName: "sparkles")
-                .foregroundStyle(.purple)
-                .font(.title2)
-            
-            TextField("Ask Lumen... (e.g., 'Photos from last week')", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 16))
+            HStack(spacing: 12) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    
+                    TextField("Ask Lumen... (e.g., 'Photos from last week')", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.system(.body, design: .rounded))
+                        .onSubmit {
+                            performSearch()
+                        }
+                }
                 .padding(12)
-                .background(Color.white.opacity(0.1))
-                .cornerRadius(10)
-                .onSubmit {
-                    performSearch()
-                }
-            
-            Picker("", selection: $searchScope) {
-                ForEach(SearchScope.allCases) { scope in
-                    Text(scope.rawValue).tag(scope)
+                .background(.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(isSearching ? Color.purple.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                )
+                
+                if isSearching {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .frame(width: 32, height: 32)
+                } else {
+                    Button(action: performSearch) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 32))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(
+                                LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
+                            )
+                    }
+                    .buttonStyle(.plain)
+    
                 }
             }
-            .pickerStyle(.menu)
-            .frame(width: 80)
-            .padding(.leading, 4)
             
-            if isSearching {
-                ProgressView()
-                    .scaleEffect(0.8)
-            } else {
-                Button(action: performSearch) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.blue)
+            HStack {
+                Picker("", selection: $searchScope) {
+                    ForEach(SearchScope.allCases) { scope in
+                        Text(scope.rawValue).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
+                
+                Spacer()
+                
+                Button(action: { showApiKeyAlert = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "key.fill")
+                            .font(.caption)
+                        Text("API Key")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.white.opacity(0.1))
+                    .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
             }
-            
-            Button(action: { showApiKeyAlert = true }) {
-                Image(systemName: "key.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Set Gemini API Key")
         }
-        .padding()
-        .background(.ultraThinMaterial)
+        .padding(20)
+        .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
     }
     
     @ViewBuilder
     private var resultsArea: some View {
         if let error = errorMessage {
-            Text(error)
-                .foregroundStyle(.red)
-                .padding()
-            Spacer()
+            VStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(.orange)
+                    .padding(.bottom, 8)
+                Text(error)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if results.isEmpty && !isSearching {
             emptyStateView
         } else {
@@ -132,83 +178,68 @@ struct AISearchView: View {
     }
     
     private var emptyStateView: some View {
-        Group {
+        VStack(spacing: 20) {
             if query.isEmpty {
-                VStack(spacing: 12) {
-                    Spacer()
-                    Image(systemName: "magnifyingglass.circle")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.secondary.opacity(0.5))
+                Spacer()
+                Image(systemName: "sparkles.rectangle.stack")
+                    .font(.system(size: 64))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.purple.opacity(0.5), .blue.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                
+                VStack(spacing: 8) {
                     Text("Search your files with AI")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .font(.system(.title2, design: .rounded))
+                        .fontWeight(.medium)
+                    
                     Text("Lumen scans your files locally and uses Gemini to find exactly what you need.")
-                        .font(.caption)
+                        .font(.system(.body, design: .rounded))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 300)
-                    Spacer()
                 }
+                Spacer()
             } else {
-                ScrollView {
-                    VStack(spacing: 16) {
-                        Text("No matches found.")
-                            .foregroundStyle(.secondary)
-                            .font(.headline)
-                        
-                        // Debug Info Section
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Debug Info")
-                                .font(.caption)
-                                .bold()
-                                .foregroundStyle(.secondary)
-                            
-                            Group {
-                                Text("Indexed Files: \(scanner.indexedFiles.count)")
-                                if !scanner.indexedFiles.isEmpty {
-                                    Text("Sample File: \(scanner.indexedFiles.first?.name ?? "None")")
-                                }
-                                Text("Last Response: \(geminiService.lastRawResponse.prefix(100))...")
-                            }
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospaced()
-                        }
-                        .padding()
-                        .background(Color.black.opacity(0.05))
-                        .cornerRadius(8)
-                    }
-                    .padding()
-                }
+                Spacer()
+                Text("No matches found")
+                    .font(.system(.title3, design: .rounded))
+                    .foregroundStyle(.secondary)
                 Spacer()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var resultsListView: some View {
         List(results, id: \.id) { (file: FileMetadata) in
-            HStack {
+            HStack(spacing: 12) {
                 Image(systemName: file.type.iconName)
                     .font(.title2)
                     .foregroundStyle(.blue)
-                    .frame(width: 30)
+                    .frame(width: 40, height: 40)
+                    .background(.blue.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(file.name)
-                        .font(.headline)
-                    HStack {
+                        .font(.system(.body, design: .rounded))
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    
+                    HStack(spacing: 6) {
                         Text(file.isRemote ? "Android" : "Mac")
-                            .font(.caption2)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(file.isRemote ? Color.green.opacity(0.2) : Color.blue.opacity(0.2))
-                            .cornerRadius(4)
+                            .foregroundStyle(file.isRemote ? Color.green : Color.blue)
+                            .clipShape(Capsule())
                         
-                        Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                        Text("•")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        Text(file.modificationDate.formatted(date: .abbreviated, time: .shortened))
+                        Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -216,39 +247,54 @@ struct AISearchView: View {
                 
                 Spacer()
                 
-                Button(action: {
-                    // Copy logic
-                    let fileSystemItem = FileSystemItem(
-                        name: file.name,
-                        path: file.path,
-                        size: file.size,
-                        type: file.type,
-                        modificationDate: file.modificationDate
-                    )
+                HStack(spacing: 0) {
+                    Button(action: {
+                        // Copy logic
+                        let fileSystemItem = FileSystemItem(
+                            name: file.name,
+                            path: file.path,
+                            size: file.size,
+                            type: file.type,
+                            modificationDate: file.modificationDate
+                        )
+                        
+                        let service: FileService = file.isRemote ? scanner.mtpService : scanner.localService
+                        
+                        clipboard = ClipboardItem(
+                            item: fileSystemItem,
+                            sourceService: service,
+                            isCut: false
+                        )
+                    }) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 14))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy file")
+    
                     
-                    let service: FileService = file.isRemote ? scanner.mtpService : scanner.localService
-                    
-                    clipboard = ClipboardItem(
-                        item: fileSystemItem,
-                        sourceService: service,
-                        isCut: false
-                    )
-                }) {
-                    Image(systemName: "doc.on.doc")
+                    Button("Open") {
+                        onOpen(file)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .clipShape(Capsule())
                 }
-                .buttonStyle(.borderless)
-                .help("Copy file")
-                .padding(.trailing, 8)
-                
-                Button("Open") {
-                    onOpen(file)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.white.opacity(0.05))
+            )
+            .padding(.horizontal, 16)
             .padding(.vertical, 4)
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
     
     private var footerView: some View {
@@ -256,6 +302,7 @@ struct AISearchView: View {
             if scanner.isScanning {
                 ProgressView(value: scanner.scanProgress)
                     .frame(width: 100)
+                    .tint(.purple)
                 Text("Indexing files...")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -265,9 +312,13 @@ struct AISearchView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            
+            Text("Powered by Gemini")
+                .font(.caption2)
+                .foregroundStyle(.secondary.opacity(0.5))
         }
-        .padding(8)
-        .background(.ultraThinMaterial)
+        .padding(12)
+        .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
     }
     
     private func performSearch() {

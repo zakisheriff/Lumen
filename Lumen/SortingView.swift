@@ -84,11 +84,11 @@ struct SortingView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(.ultraThinMaterial)
-            .cornerRadius(10)
+            .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
+            .clipShape(Capsule())
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(.separator, lineWidth: 0.5)
+                Capsule()
+                    .stroke(.white.opacity(0.1), lineWidth: 1)
             )
         }
         .menuStyle(.borderlessButton)

@@ -12,7 +12,7 @@ struct MainView: View {
     @State private var selectedCategory: String? = "split"
     @State private var clipboard: ClipboardItem?
     @State private var splitRatio: CGFloat = 0.5
-    @StateObject private var transferManager = TransferManager()
+    @EnvironmentObject var transferManager: TransferManager
     
     // AI Search
     @StateObject private var geminiService = GeminiService()
@@ -32,14 +32,20 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedCategory: $selectedCategory)
+                .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow))
         } detail: {
             ZStack {
+                // Liquid Glass Background
+                VisualEffectView(material: .contentBackground, blendingMode: .behindWindow)
+                    .ignoresSafeArea()
+                
                 Group {
                     if selectedCategory == "mac" {
                         FileBrowserView(
                             title: "Mac",
                             fileService: localService,
                             currentPath: FileManager.default.homeDirectoryForCurrentUser.path,
+                            transferManager: transferManager,
                             clipboard: $clipboard,
                             onPaste: { destPath in
                                 transferManager.startTransfer(item: clipboard!, to: localService, at: destPath)
@@ -51,6 +57,7 @@ struct MainView: View {
                             title: "Android",
                             fileService: remoteService,
                             currentPath: "mtp://",
+                            transferManager: transferManager,
                             clipboard: $clipboard,
                             onPaste: { destPath in
                                 transferManager.startTransfer(item: clipboard!, to: remoteService, at: destPath)
@@ -59,39 +66,39 @@ struct MainView: View {
                         .frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         // Split View
-                        // Custom Split View
-                        // Custom Split View
                         GeometryReader { geometry in
                             HStack(spacing: 0) {
-                                // Mac Pane - Real File System
+                                // Mac Pane
                                 FileBrowserView(
                                     title: "Mac",
                                     fileService: localService,
                                     currentPath: FileManager.default.homeDirectoryForCurrentUser.path,
+                                    transferManager: transferManager,
                                     clipboard: $clipboard,
                                     onPaste: { destPath in
                                         transferManager.startTransfer(item: clipboard!, to: localService, at: destPath)
                                     }
                                 )
                                 .frame(width: max(0, geometry.size.width * splitRatio))
+                                .clipped() // Prevent overflow covering the handle
                                 
-                                // Draggable Divider
+                                // Glass Divider
                                 ZStack {
                                     Rectangle()
-                                        .fill(Color.secondary.opacity(0.2))
+                                        .fill(.white.opacity(0.1))
                                         .frame(width: 1)
                                     
-                                    // Invisible handle for easier grabbing
-                                    Rectangle()
-                                        .fill(Color.clear)
-                                        .frame(width: 9)
+                                    // Handle
+                                    Capsule()
+                                        .fill(.secondary.opacity(0.3))
+                                        .frame(width: 4, height: 40)
                                 }
+                                .frame(width: 9)
                                 .contentShape(Rectangle())
                                 .gesture(
                                     DragGesture(coordinateSpace: .named("splitView"))
                                         .onChanged { value in
                                             let newRatio = value.location.x / geometry.size.width
-                                            // Clamp between 20% and 80%
                                             splitRatio = min(max(newRatio, 0.2), 0.8)
                                         }
                                 )
@@ -102,44 +109,31 @@ struct MainView: View {
                                         NSCursor.pop()
                                     }
                                 }
+                                .zIndex(10) // Ensure handle is always on top
                                 
-                                // Android Pane - Real MTP Connection
+                                // Android Pane
                                 FileBrowserView(
                                     title: "Android",
                                     fileService: remoteService,
                                     currentPath: "mtp://",
+                                    transferManager: transferManager,
                                     clipboard: $clipboard,
                                     onPaste: { destPath in
                                         transferManager.startTransfer(item: clipboard!, to: remoteService, at: destPath)
                                     }
                                 )
-                                .frame(width: max(0, geometry.size.width * (1 - splitRatio) - 1))
+                                .frame(width: max(0, geometry.size.width * (1 - splitRatio) - 9))
+                                .clipped() // Prevent overflow covering the handle
                             }
                         }
                         .coordinateSpace(name: "splitView")
                     }
                 }
-                .padding()
-                
-                if transferManager.isTransferring {
-                    Color.black.opacity(0.3)
-                        .edgesIgnoringSafeArea(.all)
-                    
-                    TransferProgressView(
-                        filename: transferManager.filename,
-                        progress: transferManager.progress,
-                        status: transferManager.status,
-                        transferSpeed: transferManager.transferSpeed,
-                        timeRemaining: transferManager.timeRemaining,
-                        onCancel: {
-                            transferManager.cancel()
-                        }
-                    )
-                }
+                .padding(10) // Add some breathing room for the floating effect
             }
-            // .background(.regularMaterial) // Removed to allow unified window background to show through
         }
         .frame(minWidth: 800, minHeight: 500)
+
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
                 // Window Size Menu
@@ -155,7 +149,7 @@ struct MainView: View {
                     }
                 } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .help("Window Size")
+                        .font(.system(size: 14, weight: .medium))
                 }
                 
                 // Center Split Button
@@ -166,17 +160,18 @@ struct MainView: View {
                         }
                     }) {
                         Image(systemName: "rectangle.split.2x1")
-                            .help("Center Split")
+                        .font(.system(size: 14, weight: .medium))
                     }
                 }
                 
                 // AI Search Button
                 Button(action: { showAISearch.toggle() }) {
                     Image(systemName: "sparkles")
-                        .foregroundStyle(.purple)
+                        .symbolEffect(.pulse.byLayer, isActive: showAISearch)
+                        .foregroundStyle(.linearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
                 }
                 
-                // Buy Me a Coffee button in toolbar
+                // Buy Me a Coffee button
                 BuyMeACoffeeButton {
                     openCoffeePurchaseURL()
                 }
@@ -186,11 +181,10 @@ struct MainView: View {
             Group {
                 if showAISearch {
                     ZStack {
-                        Color.black.opacity(0.4)
+                        Color.black.opacity(0.2)
                             .edgesIgnoringSafeArea(.all)
                             .onTapGesture {
-                                // Optional: Uncomment to allow closing by clicking background
-                                // showAISearch = false
+                                showAISearch = false
                             }
                         
                         AISearchView(
@@ -198,21 +192,27 @@ struct MainView: View {
                             geminiService: geminiService,
                             clipboard: $clipboard,
                             onOpen: { file in
-                                // Handle opening/transferring file
                                 if file.isRemote {
                                     print("Opening remote file: \(file.path)")
                                 } else {
                                     NSWorkspace.shared.open(URL(fileURLWithPath: file.path))
                                 }
-                                // showAISearch = false // Keep open as requested
                             },
                             onClose: {
                                 showAISearch = false
                             }
                         )
-                        .shadow(radius: 20)
+                        .frame(width: 600, height: 400)
+                        .background(VisualEffectView(material: .popover, blendingMode: .withinWindow))
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(.white.opacity(0.2), lineWidth: 1)
+                        )
                     }
-                    .transition(.opacity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .zIndex(200)
                 }
             }
         )

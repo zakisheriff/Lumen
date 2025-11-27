@@ -24,6 +24,7 @@ enum GeminiSearchError: LocalizedError {
     }
 }
 
+@MainActor
 class GeminiService: ObservableObject {
     @Published var apiKey: String {
         didSet {
@@ -112,9 +113,7 @@ class GeminiService: ObservableObject {
         """
 
         // Debug: Capture prompt
-        DispatchQueue.main.async {
-            self.lastPrompt = prompt
-        }
+        self.lastPrompt = prompt
 
         // 3. Prepare the API Request
         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
@@ -177,9 +176,7 @@ class GeminiService: ObservableObject {
             
             // Debug: Print raw response text
             print("Raw AI Response: \(cleanText)")
-            DispatchQueue.main.async {
-                self.lastRawResponse = cleanText
-            }
+            self.lastRawResponse = cleanText
             
             if let data = cleanText.data(using: .utf8),
                let paths = try? JSONDecoder().decode([String].self, from: data) {
@@ -211,9 +208,7 @@ class GeminiService: ObservableObject {
         // Debugging: Print raw response if structure is unexpected
         if let rawString = String(data: data, encoding: .utf8) {
             print("Invalid Response Structure. Raw: \(rawString)")
-            DispatchQueue.main.async {
-                self.lastRawResponse = rawString
-            }
+            self.lastRawResponse = rawString
         }
         
         throw GeminiSearchError.invalidResponse

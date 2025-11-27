@@ -12,14 +12,18 @@ struct SidebarView: View {
     
     var body: some View {
         List(selection: $selectedCategory) {
-            Label("Split Screen", systemImage: "square.split.2x1")
-                .tag("split")
-            Label("Mac", systemImage: "desktopcomputer")
-                .tag("mac")
-            Label("Android", systemImage: "phone.fill")
-                .tag("android")
+            Section("Views") {
+                Label("Split Screen", systemImage: "square.split.2x1")
+                    .tag("split")
+                Label("Mac", systemImage: "desktopcomputer")
+                    .tag("mac")
+                Label("Android", systemImage: "phone.fill")
+                    .tag("android")
+            }
         }
-        .listStyle(SidebarListStyle())
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .font(.system(.body, design: .rounded))
         .frame(minWidth: 200)
     }
 }

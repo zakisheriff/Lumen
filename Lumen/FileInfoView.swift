@@ -4,29 +4,32 @@ struct FileInfoView: View {
     let item: FileSystemItem
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 16) {
                 IconHelper.nativeIcon(for: item)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 64, height: 64)
+                    .frame(width: 80, height: 80)
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
                 
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(item.name)
-                        .font(.title2)
+                        .font(.system(.title2, design: .rounded))
                         .fontWeight(.semibold)
                     
                     Text(item.isDirectory ? "Folder" : item.type.rawValue.capitalized)
-                        .font(.subheadline)
+                        .font(.system(.body, design: .rounded))
                         .foregroundColor(.secondary)
                 }
                 
                 Spacer()
             }
+            .padding(.bottom, 8)
             
             Divider()
+                .background(.white.opacity(0.1))
             
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 InfoRow(label: "Kind", value: item.isDirectory ? "Folder" : item.type.rawValue.capitalized)
                 
                 InfoRow(label: "Size", value: item.formattedSize)
@@ -40,8 +43,9 @@ struct FileInfoView: View {
             
             Spacer()
         }
-        .padding()
-        .frame(minWidth: 400, minHeight: 300)
+        .padding(24)
+        .frame(minWidth: 400, minHeight: 350)
+        .background(VisualEffectView(material: .popover, blendingMode: .withinWindow))
         .navigationTitle("Get Info")
     }
 }

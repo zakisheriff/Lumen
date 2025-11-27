@@ -16,7 +16,7 @@ enum ConnectionState: String, Equatable {
     case error
 }
 
-class MTPService: FileService {
+class MTPService: FileService, @unchecked Sendable {
     
     // Serial queue for thread safety with libmtp which is not thread-safe
     private let queue = DispatchQueue(label: "com.lumen.mtp.queue", qos: .userInitiated)

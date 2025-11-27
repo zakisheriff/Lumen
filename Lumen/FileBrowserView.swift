@@ -17,10 +17,12 @@ struct FileBrowserView: View {
     let title: String
     let fileService: FileService
     @State var currentPath: String
+    let transferManager: TransferManager
     
     @State private var items: [FileSystemItem] = []
     @State private var selection = Set<UUID>()
     @State private var errorMessage: String?
+
     
     // Finder Features State
     @State private var searchText = ""
@@ -342,118 +344,131 @@ struct FileBrowserView: View {
     @State private var itemToDelete: FileSystemItem?
     
     // Computed property for the header/toolbar
+    // Computed property for the header/toolbar
     private var headerView: some View {
-        HStack {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(.secondary)
-            
-            Text(displayPath(currentPath))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+        HStack(spacing: 16) {
+            // Path / Title
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                
+                Text(displayPath(currentPath))
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
+            .clipShape(Capsule())
             
             Spacer()
             
-            // Navigation Controls with Apple-like styling
-            HStack(spacing: 4) {
-                Button(action: navigateHome) {
-                    Image(systemName: "house")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.borderless)
-                .disabled(currentPath == homePath)
-                .help("Home")
-                
+            // Navigation Controls
+            HStack(spacing: 0) {
                 Button(action: navigateBack) {
                     Image(systemName: "arrow.left")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 20, height: 20)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 32, height: 28)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .disabled(!canNavigateBack)
                 .help("Back")
                 
+                Divider()
+                    .frame(height: 16)
+                
                 Button(action: navigateForward) {
                     Image(systemName: "arrow.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 20, height: 20)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 32, height: 28)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .disabled(!canNavigateForward)
                 .help("Forward")
                 
+                Divider()
+                    .frame(height: 16)
+                    
+                Button(action: navigateUp) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 32, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canNavigateUp)
+                .help("Up")
+                
+                Divider()
+                    .frame(height: 16)
+                
                 Button(action: loadItems) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 20, height: 20)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 32, height: 28)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("Refresh")
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.ultraThinMaterial)
-            .cornerRadius(10)
+            .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
+            .clipShape(Capsule())
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(.separator, lineWidth: 0.5)
+                Capsule()
+                    .stroke(.white.opacity(0.1), lineWidth: 1)
             )
             
-            // Search with Apple-like styling
-            TextField("Search", text: $searchText)
-                .textFieldStyle(.plain)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(.ultraThinMaterial)
-                .cornerRadius(10)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(.separator, lineWidth: 0.5)
-                )
-                .frame(width: 180)
-            
-            // Sort Menu
-            SortingView(
-                sortOption: $sortOption,
-                sortOrder: $sortOrder
+            // Search
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                
+                TextField("Search", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(.body, design: .rounded))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(width: 200)
+            .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(.white.opacity(0.1), lineWidth: 1)
             )
             
-            // Paste Button
-            if clipboard != nil {
-                Button(action: {
-                    onPaste(currentPath)
-                }) {
-                    Image(systemName: "doc.on.clipboard")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 20, height: 20)
+            // View Toggle & Sort
+            HStack(spacing: 0) {
+                Picker("View", selection: $isGridView) {
+                    Image(systemName: "square.grid.2x2").tag(true)
+                    Image(systemName: "list.bullet").tag(false)
                 }
-                .buttonStyle(.borderless)
-                .help("Paste")
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 80)
+                
+                SortingView(
+                    sortOption: $sortOption,
+                    sortOrder: $sortOrder
+                )
+                .frame(width: 30)
             }
-
-            
-            // View Toggle with Apple-like styling
-            Picker("View", selection: $isGridView) {
-                Image(systemName: "list.bullet").tag(false)
-                Image(systemName: "square.grid.2x2").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 100)
             .padding(4)
-            .background(.ultraThinMaterial)
-            .cornerRadius(10)
+            .background(VisualEffectView(material: .headerView, blendingMode: .withinWindow))
+            .clipShape(Capsule())
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(.separator, lineWidth: 0.5)
+                Capsule()
+                    .stroke(.white.opacity(0.1), lineWidth: 1)
             )
         }
         .padding(.horizontal)
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        // .background(.ultraThinMaterial) // Removed to allow unified window background to show through
+        .padding(.vertical, 12)
     }
     
     // Computed property for the file content view
@@ -467,12 +482,77 @@ struct FileBrowserView: View {
                 fileItemsView
             }
         }
-        .background(.background) // Use system background
-        .onDrop(of: [.text], isTargeted: nil) { providers in
+        .scrollContentBackground(.hidden) // Use hidden to allow window background to show through
+        .onDrop(of: [.text, .item], isTargeted: nil) { providers in
+            print("🔍 DROP: Received \(providers.count) providers")
+            
+            // First, check if this is an internal clipboard paste
             if clipboard != nil {
+                print("🔍 DROP: Internal clipboard paste detected")
                 onPaste(currentPath)
                 return true
             }
+            
+            // Check if any provider can load a URL
+            var hasLoadableURLs = false
+            for provider in providers {
+                print("🔍 DROP: Checking provider: \(provider)")
+                print("🔍 DROP: Can load URL? \(provider.canLoadObject(ofClass: URL.self))")
+                if provider.canLoadObject(ofClass: URL.self) {
+                    hasLoadableURLs = true
+                    break
+                }
+            }
+            
+            print("🔍 DROP: Has loadable URLs? \(hasLoadableURLs)")
+            
+            // If we have loadable URLs, load them asynchronously
+            if hasLoadableURLs {
+                print("🔍 DROP: Starting async file load...")
+                Task {
+                    var fileURLs: [URL] = []
+                    
+                    // Load all file URLs
+                    await withTaskGroup(of: URL?.self) { group in
+                        for provider in providers {
+                            if provider.canLoadObject(ofClass: URL.self) {
+                                group.addTask {
+                                    await withCheckedContinuation { continuation in
+                                        _ = provider.loadObject(ofClass: URL.self) { url, error in
+                                            print("🔍 DROP: Loaded URL: \(url?.path ?? "nil"), error: \(error?.localizedDescription ?? "none")")
+                                            continuation.resume(returning: url)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        for await url in group {
+                            if let url = url {
+                                fileURLs.append(url)
+                            }
+                        }
+                    }
+                    
+                    print("🔍 DROP: Loaded \(fileURLs.count) file URLs")
+                    
+                    await MainActor.run {
+                        if !fileURLs.isEmpty {
+                            print("🔍 DROP: Starting transfer for \(fileURLs.count) files to \(currentPath)")
+                            if fileURLs.count == 1 {
+                                transferManager.startTransferFromURL(fileURLs[0], to: fileService, at: currentPath)
+                            } else {
+                                transferManager.startMultipleTransfers(fileURLs, to: fileService, at: currentPath)
+                            }
+                        } else {
+                            print("🔍 DROP: No file URLs loaded!")
+                        }
+                    }
+                }
+                return true
+            }
+            
+            print("🔍 DROP: Returning false - no loadable URLs found")
             return false
         }
         .contextMenu {
@@ -482,6 +562,7 @@ struct FileBrowserView: View {
                 }
             }
         }
+
     }
     
     private func errorView(errorMessage: String) -> some View {
@@ -652,28 +733,33 @@ struct FileBrowserView: View {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: iconSize, height: iconSize)
-                .shadow(radius: 2, y: 1)
+                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
             
             Text(item.name)
-                .font(.caption)
+                .font(.system(.caption, design: .rounded))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.primary)
         }
-        .padding(6)
+        .padding(12)
         .background(
             ZStack {
                 if selection.contains(item.id) {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.15))
-                    
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(.selection)
+                } else {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(.regularMaterial)
+                        .opacity(0.0) // Invisible by default, shows on hover if we add hover state logic
                 }
             }
         )
-        .cornerRadius(12)
-        .hoverEffect()
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.1), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
         .onTapGesture(count: 2) {
             handleDoubleClick(on: item)
         }
@@ -693,11 +779,12 @@ struct FileBrowserView: View {
     }
     
     private var fileListView: some View {
-        LazyVStack(spacing: 0) {
+        LazyVStack(spacing: 4) {
             ForEach(filteredAndSortedItems) { item in
                 fileListItem(item)
             }
         }
+        .padding(.horizontal)
     }
     
     private func fileListItem(_ item: FileSystemItem) -> some View {
@@ -705,12 +792,12 @@ struct FileBrowserView: View {
             IconHelper.nativeIcon(for: item)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 24, height: 24)
+                .frame(width: 28, height: 28)
                 .shadow(radius: 1, y: 0.5)
             
             VStack(alignment: .leading) {
                 Text(item.name)
-                    .font(.body)
+                    .font(.system(.body, design: .rounded))
                     .lineLimit(1)
                     .foregroundColor(.primary)
             }
@@ -718,30 +805,31 @@ struct FileBrowserView: View {
             Spacer()
             
             Text(item.formattedSize)
-                .font(.subheadline)
+                .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(.secondary)
                 .frame(width: 70, alignment: .trailing)
             
             Text(item.formattedDate)
-                .font(.subheadline)
+                .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(.secondary)
                 .frame(width: 120, alignment: .trailing)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .padding(.horizontal, 12)
         .background(
             ZStack {
                 if selection.contains(item.id) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.15))
-                    
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.selection)
+                } else {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.regularMaterial)
+                        .opacity(0.0)
                 }
             }
         )
         .contentShape(Rectangle())
-        .hoverEffect()
+
         .onTapGesture(count: 2) {
             handleDoubleClick(on: item)
         }
@@ -810,6 +898,11 @@ struct FileBrowserView: View {
                 
                 Task {
                     do {
+                        // Notify TransferManager
+                        await MainActor.run {
+                            self.transferManager.startExternalTransfer(filename: item.name, totalSize: item.size)
+                        }
+                        
                         // Create a temporary file URL
                         let tempDir = FileManager.default.temporaryDirectory
                         let tempURL = tempDir.appendingPathComponent(item.name)
@@ -821,6 +914,16 @@ struct FileBrowserView: View {
                         // We capture fileService explicitly
                         try await self.fileService.downloadFile(at: item.path, to: tempURL, size: item.size) { p, _ in
                             progress.completedUnitCount = Int64(p * 100)
+                            
+                            // Update TransferManager
+                            Task { @MainActor in
+                                self.transferManager.updateProgress(progress: p, status: "Copying \(item.name)...", totalSize: item.size)
+                            }
+                        }
+                        
+                        // Completion
+                        Task { @MainActor in
+                            await self.transferManager.finishExternalTransfer()
                         }
                         
                         // Call completion with the file URL
@@ -828,6 +931,12 @@ struct FileBrowserView: View {
                         completionHandler(tempURL, false, nil)
                     } catch {
                         print("Error downloading file for drag: \(error)")
+                        
+                        // Error handling
+                        Task { @MainActor in
+                            await self.transferManager.failExternalTransfer(error: error)
+                        }
+                        
                         completionHandler(nil, false, error)
                     }
                 }

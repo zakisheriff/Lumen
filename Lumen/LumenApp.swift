@@ -10,15 +10,67 @@ import SwiftUI
 @main
 struct LumenApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var transferManager = TransferManager()
     
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(transferManager)
+                .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow).ignoresSafeArea())
+                .background(WindowAccessor(transferManager: transferManager))
         }
+        .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .commands {
             WindowSizeCommands()
         }
+        
+        WindowGroup(id: "transfer-progress") {
+            TransferProgressWindow()
+                .environmentObject(transferManager)
+                .frame(width: 400, height: 160)
+                .fixedSize()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+    }
+}
+
+// Helper to access window for opening other windows
+struct WindowAccessor: View {
+    @ObservedObject var transferManager: TransferManager
+    @Environment(\.openWindow) var openWindow
+    @Environment(\.dismissWindow) var dismissWindow
+    
+    var body: some View {
+        EmptyView()
+            .onChange(of: transferManager.isTransferring) { isTransferring in
+                if isTransferring {
+                    openWindow(id: "transfer-progress")
+                } else {
+                    // We let the window dismiss itself or use dismissWindow
+                    // dismissWindow(id: "transfer-progress") // Optional, but safer to let window handle it
+                }
+            }
+    }
+}
+
+struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+    
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let visualEffectView = NSVisualEffectView()
+        visualEffectView.material = material
+        visualEffectView.blendingMode = blendingMode
+        visualEffectView.state = .active
+        return visualEffectView
+    }
+    
+    func updateNSView(_ visualEffectView: NSVisualEffectView, context: Context) {
+        visualEffectView.material = material
+        visualEffectView.blendingMode = blendingMode
     }
 }
 
